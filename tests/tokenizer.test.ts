@@ -236,6 +236,45 @@ describe('BpeTokenizer', () => {
     expect(loadBpe(pairs).encode('e2e4 e7e5')).toEqual([11, 4, 7, 4, 8]);
   });
 
+  it('resolves added tokens that are not in model.vocab', () => {
+    const withAdded: BpeFile = {
+      model: file.model,
+      added_tokens: [{ id: 42, content: '<mask>', special: true }],
+    };
+    expect(loadBpe(withAdded).encode('e2e4<mask>')).toEqual([11, 42]);
+  });
+
+  it.each([
+    ['model.type', { model: { ...file.model, type: 'WordPiece' } }],
+    ['model.dropout', { model: { ...file.model, dropout: 0.1 } }],
+    [
+      'model.continuing_subword_prefix',
+      { model: { ...file.model, continuing_subword_prefix: '##' } },
+    ],
+    ['model.end_of_word_suffix', { model: { ...file.model, end_of_word_suffix: '</w>' } }],
+    ['model.fuse_unk', { model: { ...file.model, fuse_unk: true } }],
+    ['model.byte_fallback', { model: { ...file.model, byte_fallback: true } }],
+    ['pre_tokenizer.type', { model: file.model, pre_tokenizer: { type: 'ByteLevel' } }],
+  ])('rejects an unsupported %s instead of ignoring it', (option, json) => {
+    expect(() => loadBpe(json as BpeFile)).toThrow(`unsupported BPE model: ${option}`);
+  });
+
+  it('accepts the options the trained bpe.json actually carries', () => {
+    const defaults: BpeFile = {
+      model: {
+        ...file.model,
+        dropout: null,
+        continuing_subword_prefix: null,
+        end_of_word_suffix: null,
+        fuse_unk: false,
+        byte_fallback: false,
+        ignore_merges: false,
+      },
+      pre_tokenizer: { type: 'WhitespaceSplit' },
+    };
+    expect(loadBpe(defaults).encode('e2e4 e7e5')).toEqual([11, 14]);
+  });
+
   it('merges the leftmost occurrence first on equal rank', () => {
     const bpe = loadBpe({
       model: {

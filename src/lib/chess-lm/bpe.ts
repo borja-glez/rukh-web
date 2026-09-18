@@ -3,6 +3,8 @@
 // UCI text. It reads the `tokenizer.json` that `Tokenizer.save()` writes and reproduces the
 // encoder: split on whitespace, start from single characters and merge the adjacent pair with
 // the lowest merge rank (leftmost on ties) until nothing merges, then map symbols to ids.
+// Only that subset is implemented: a file with dropout, `fuse_unk`, `byte_fallback`, an affix or
+// another pre-tokenizer is rejected by the constructor instead of being encoded incorrectly.
 
 export interface BpeAddedToken {
   id: number;
@@ -15,13 +17,59 @@ export interface BpeFile {
     type?: string;
     unk_token?: string | null;
     ignore_merges?: boolean;
+    dropout?: number | null;
+    continuing_subword_prefix?: string | null;
+    end_of_word_suffix?: string | null;
+    fuse_unk?: boolean;
+    byte_fallback?: boolean;
     vocab: Record<string, number>;
     merges: string[] | [string, string][];
   };
+  pre_tokenizer?: { type?: string } | null;
   added_tokens?: BpeAddedToken[];
 }
 
 export const DEFAULT_UNK_TOKEN = '<unk>';
+
+/** Pre-tokenizers this loader reproduces; anything else splits words differently. */
+const SUPPORTED_PRE_TOKENIZERS = ['WhitespaceSplit'];
+
+/**
+ * Rejects a `tokenizer.json` whose options this loader does not implement, instead of encoding
+ * it as if they held their default value. The supported subset is listed in the README.
+ */
+function assertSupported(file: BpeFile): void {
+  const { model } = file;
+  const unsupported = (option: string, value: unknown, expected: string): Error =>
+    new Error(
+      `unsupported BPE model: ${option} is ${JSON.stringify(value) ?? 'undefined'}, ` +
+        `this loader only supports ${expected}`,
+    );
+
+  if (model.type !== undefined && model.type !== 'BPE') {
+    throw unsupported('model.type', model.type, '"BPE"');
+  }
+  if (model.dropout !== undefined && model.dropout !== null) {
+    throw unsupported('model.dropout', model.dropout, 'null');
+  }
+  for (const option of ['continuing_subword_prefix', 'end_of_word_suffix'] as const) {
+    const value = model[option];
+    if (value !== undefined && value !== null && value !== '') {
+      throw unsupported(`model.${option}`, value, 'null or ""');
+    }
+  }
+  for (const option of ['fuse_unk', 'byte_fallback'] as const) {
+    if (model[option] === true) throw unsupported(`model.${option}`, true, 'false');
+  }
+  const preTokenizer = file.pre_tokenizer;
+  if (preTokenizer != null && !SUPPORTED_PRE_TOKENIZERS.includes(preTokenizer.type ?? '')) {
+    throw unsupported(
+      'pre_tokenizer.type',
+      preTokenizer.type,
+      SUPPORTED_PRE_TOKENIZERS.map((type) => `"${type}"`).join(', '),
+    );
+  }
+}
 
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -38,6 +86,7 @@ export class BpeTokenizer {
   private readonly ignoreMerges: boolean;
 
   constructor(file: BpeFile) {
+    assertSupported(file);
     const { model } = file;
     this.vocab = new Map(Object.entries(model.vocab));
     const size = Math.max(-1, ...this.vocab.values()) + 1;
@@ -71,7 +120,9 @@ export class BpeTokenizer {
 
   /** Ids of the tokens of `text`, applying added tokens first and BPE to the rest. */
   encode(text: string): number[] {
-    return this.tokenize(text).map((token) => this.vocab.get(token) ?? this.unkId);
+    return this.tokenize(text).map(
+      (token) => this.addedTokens.get(token) ?? this.vocab.get(token) ?? this.unkId,
+    );
   }
 
   /** Token strings of `text` (unknown characters stay as themselves). */

@@ -31,7 +31,8 @@ export const MASK_ID = 3;
 export const UNK_ID = 4;
 
 export const ELO_MIN = 600;
-export const ELO_MAX = 3299;
+/** Upper clamp before binning, so 3200+ lands in `<w3200>`; it is not the highest bin (3200). */
+export const ELO_CLAMP_MAX = 3299;
 export const ELO_BIN_WIDTH = 100;
 /** Number of Elo bins per side: 600, 700, ..., 3200. */
 export const ELO_BIN_COUNT = 27;
@@ -63,7 +64,7 @@ function reachable(from: string, to: string): boolean {
 
 /** Maps an Elo to its bin token: `clamp(elo, 600, 3299)` floored to hundreds, four digits. */
 export function eloBin(elo: number, side: 'w' | 'b'): string {
-  const clamped = Math.min(Math.max(elo, ELO_MIN), ELO_MAX);
+  const clamped = Math.min(Math.max(elo, ELO_MIN), ELO_CLAMP_MAX);
   const bin = Math.floor(clamped / ELO_BIN_WIDTH) * ELO_BIN_WIDTH;
   return `<${side}${String(bin).padStart(4, '0')}>`;
 }

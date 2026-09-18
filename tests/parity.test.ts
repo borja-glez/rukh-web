@@ -76,10 +76,12 @@ describe('parity with Python', () => {
     }
   });
 
+  // Python encodes the moves concatenated without spaces (`bpe_text` in
+  // artifacts/tokenizer/README.md), so a whole game is a single BPE "word".
   it('loadBpe(bpe.json).encode reproduces bpe_ids', () => {
     const bpe = loadBpe(readJson<BpeFile>('bpe.json'));
     for (const [i, game] of readGames().entries()) {
-      expect(bpe.encode(game.uci), `game ${i}`).toEqual(game.bpe_ids);
+      expect(bpe.encode(game.uci.replaceAll(' ', '')), `game ${i}`).toEqual(game.bpe_ids);
     }
   });
 });

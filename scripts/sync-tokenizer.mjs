@@ -11,6 +11,54 @@ const localSource = '../rukh/artifacts/tokenizer';
 const HUB_SOURCE = 'https://huggingface.co/chorcat/rukh-tokenizer/resolve/main';
 const files = ['vocab.json', 'bpe.json', 'fixtures/games.json'];
 
+const VOCAB_SIZE = 2030;
+const FIXTURE_GAMES = 20;
+const FIXTURE_KEYS = [
+  'id',
+  'uci',
+  'san',
+  'white_elo',
+  'black_elo',
+  'result',
+  'uci_ids',
+  'san_ids',
+  'bpe_ids',
+];
+
+/**
+ * Rejects a file that parses as JSON but is not the artifact we expect, so a half-written or
+ * stale export fails here instead of silently landing in src/lib/chess-lm/.
+ */
+function validate(name, data) {
+  const fail = (why) => {
+    throw new Error(`${name}: ${why}`);
+  };
+  if (name === 'vocab.json') {
+    if (!Array.isArray(data?.tokens)) fail('no `tokens` array');
+    if (data.tokens.length !== VOCAB_SIZE) {
+      fail(`tokens.length is ${data.tokens.length}, expected ${VOCAB_SIZE}`);
+    }
+    if (!data.tokens.every((token) => typeof token === 'string')) fail('tokens are not strings');
+  }
+  if (name === 'bpe.json') {
+    const model = data?.model;
+    if (!model) fail('no `model` object');
+    if (!model.vocab || typeof model.vocab !== 'object') fail('no `model.vocab` object');
+    if (!Array.isArray(model.merges) || model.merges.length === 0) fail('no `model.merges` list');
+  }
+  if (name === 'fixtures/games.json') {
+    const games = Array.isArray(data) ? data : data?.games;
+    if (!Array.isArray(games)) fail('not an array of games');
+    if (games.length !== FIXTURE_GAMES) {
+      fail(`${games.length} games, expected ${FIXTURE_GAMES}`);
+    }
+    games.forEach((game, i) => {
+      const missing = FIXTURE_KEYS.filter((key) => game?.[key] === undefined);
+      if (missing.length > 0) fail(`game ${i} is missing ${missing.join(', ')}`);
+    });
+  }
+}
+
 const args = process.argv.slice(2);
 const fromIndex = args.indexOf('--from');
 let source = localSource;
@@ -35,7 +83,7 @@ async function read(name) {
 try {
   for (const name of files) {
     const text = await read(name);
-    JSON.parse(text); // fail early on a truncated download
+    validate(name, JSON.parse(text)); // fail early on a truncated download or a stale export
     const target = resolve(root, 'src/lib/chess-lm', name);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, text.endsWith('\n') ? text : `${text}\n`);

@@ -2,7 +2,7 @@ export {
   BOS_ID,
   ELO_BIN_COUNT,
   ELO_BIN_WIDTH,
-  ELO_MAX,
+  ELO_CLAMP_MAX,
   ELO_MIN,
   EOS_ID,
   MASK_ID,

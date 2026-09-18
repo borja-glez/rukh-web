@@ -66,12 +66,43 @@ The demo (and the course playground) uses it to turn the game into the ids the m
 - `bpe.ts`: applies a BPE model trained with Hugging Face `tokenizers` (whitespace split, merges
   by rank) from its `tokenizer.json`.
 
+### Supported BPE subset
+
+`loadBpe()` reproduces one configuration only, the one `rukh data tokenize --scheme bpe` writes,
+and throws from the constructor when the file deviates from it instead of encoding it as if the
+option were absent:
+
+| Option                            | Supported value               |
+| --------------------------------- | ----------------------------- |
+| `model.type`                      | `"BPE"` (or absent)           |
+| `model.dropout`                   | `null`                        |
+| `model.continuing_subword_prefix` | `null` or `""`                |
+| `model.end_of_word_suffix`        | `null` or `""`                |
+| `model.fuse_unk`                  | `false`                       |
+| `model.byte_fallback`             | `false`                       |
+| `pre_tokenizer`                   | `WhitespaceSplit` (or `null`) |
+
+`model.ignore_merges` is honoured (both values work). Normalizers, post-processors and decoders
+are not applied: the trained model has none, and `bpe_ids` in the fixture are the raw
+`Tokenizer.encode(text).ids`.
+
 `pnpm sync:tokenizer` copies `vocab.json`, `bpe.json` and `fixtures/games.json` from
-`../rukh/artifacts/tokenizer` into `src/lib/chess-lm/`; `--from <baseUrl>` downloads them
-instead (the default base is `https://huggingface.co/chorcat/rukh-tokenizer/resolve/main`).
+`../rukh/artifacts/tokenizer` into `src/lib/chess-lm/` (validating each one: 2030 tokens in the
+vocabulary, `model.vocab` plus `model.merges` in the BPE and 20 complete games in the fixture);
+`--from <baseUrl>` downloads them instead (the default base is
+`https://huggingface.co/chorcat/rukh-tokenizer/resolve/main`).
+
+### Parity with Python
+
 `tests/parity.test.ts` checks that the three TypeScript tokenizers reproduce, id by id, what
 Python exported for the 20 fixture games; the synced files are committed so the tests run
-without the ML repo.
+without the ML repo. Two details of the fixture are easy to get wrong:
+
+- The BPE text is the UCI moves **concatenated without spaces** (`e2e4e7e5...`), so the test
+  encodes `game.uci.replaceAll(' ', '')`; encoding the spaced string gives different ids.
+- `decode()` is deliberately more forgiving than Python: an id outside the vocabulary maps to
+  `<unk>` here, while `UciTokenizer.decode` in Python raises `IndexError`. The browser decodes
+  whatever the model samples, so it must not crash on an out-of-range id.
 
 ## Where the model comes from
 
