@@ -1,8 +1,10 @@
 import type { Signal } from '@preact/signals';
-import type { GameState } from '../lib/game';
+import { useEffect, useRef } from 'preact/hooks';
+import { canUndo, type Color, type GameState } from '../lib/game';
 
 interface Props {
   game: Signal<GameState>;
+  human: Signal<Color>;
   busy: Signal<boolean>;
   onUndo: () => void;
   onNewGame: () => void;
@@ -44,17 +46,23 @@ async function download(pgn: string) {
   }
 }
 
-export default function MoveList({ game, busy, onUndo, onNewGame, onExport }: Props) {
+export default function MoveList({ game, human, busy, onUndo, onNewGame, onExport }: Props) {
   const { history } = game.value;
   const rows = pairs(history);
   const current = history.length - 1;
+  const list = useRef<HTMLOListElement>(null);
+
+  // Keep the current ply visible once the list grows past its fixed height.
+  useEffect(() => {
+    list.current?.querySelector('.is-current')?.scrollIntoView({ block: 'nearest' });
+  }, [history.length]);
 
   return (
     <section class="moves" aria-labelledby="moves-title">
       <h2 id="moves-title" class="label">
         Jugadas
       </h2>
-      <ol class="moves__list" data-testid="move-list" aria-label="Lista de jugadas">
+      <ol class="moves__list" data-testid="move-list" aria-label="Lista de jugadas" ref={list}>
         {rows.length === 0 ? (
           <li class="moves__empty caption">Sin jugadas</li>
         ) : (
@@ -91,7 +99,7 @@ export default function MoveList({ game, busy, onUndo, onNewGame, onExport }: Pr
           type="button"
           class="btn"
           onClick={onUndo}
-          disabled={busy.value || history.length === 0}
+          disabled={busy.value || !canUndo(game.value, human.value)}
         >
           Deshacer
         </button>

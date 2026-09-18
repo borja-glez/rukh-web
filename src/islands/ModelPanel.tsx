@@ -9,7 +9,6 @@ interface Props {
   busy: Signal<boolean>;
   onStage: (id: string) => void;
   onColor: (color: Color) => void;
-  onNewGame: () => void;
 }
 
 function statusText(game: GameState, human: Color, busy: boolean): string {
@@ -22,17 +21,10 @@ function statusText(game: GameState, human: Color, busy: boolean): string {
   return game.turn === human ? 'Te toca mover' : 'Turno del modelo';
 }
 
-export default function ModelPanel({
-  game,
-  human,
-  stage,
-  busy,
-  onStage,
-  onColor,
-  onNewGame,
-}: Props) {
+export default function ModelPanel({ game, human, stage, busy, onStage, onColor }: Props) {
   const state = game.value;
   const color = human.value;
+  const locked = busy.value;
 
   return (
     <section class="model" aria-labelledby="model-title">
@@ -59,16 +51,25 @@ export default function ModelPanel({
         {statusText(state, color, busy.value)}
       </p>
       <div class="model__row" role="group" aria-label="Color">
-        <button type="button" class="btn" aria-pressed={color === 'w'} onClick={() => onColor('w')}>
+        <button
+          type="button"
+          class="btn"
+          aria-pressed={color === 'w'}
+          disabled={locked}
+          onClick={() => onColor('w')}
+        >
           Blancas
         </button>
-        <button type="button" class="btn" aria-pressed={color === 'b'} onClick={() => onColor('b')}>
+        <button
+          type="button"
+          class="btn"
+          aria-pressed={color === 'b'}
+          disabled={locked}
+          onClick={() => onColor('b')}
+        >
           Negras
         </button>
       </div>
-      <button type="button" class="btn btn--primary model__new" onClick={onNewGame}>
-        Nueva partida
-      </button>
     </section>
   );
 }

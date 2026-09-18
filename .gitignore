@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# cm-chessboard sprites copied by scripts/copy-assets.mjs (predev/prebuild)
+/public/pieces/
+/public/extensions/
 .astro/
 .lighthouseci/
 lighthouse-reports/

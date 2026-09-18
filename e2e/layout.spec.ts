@@ -1,33 +1,42 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { openBoard } from './helpers';
+
+/** Layout invariants shared by every viewport: no horizontal scroll, square board that fits. */
+async function expectBoardFits(page: Page, minBoard: number) {
+  const overflow = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+
+  const board = await page.getByTestId('board').boundingBox();
+  const panel = await page.getByTestId('panel').boundingBox();
+  expect(board).not.toBeNull();
+  expect(panel).not.toBeNull();
+  if (!board || !panel) throw new Error('board or panel not rendered');
+
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error('viewport unknown');
+
+  expect(Math.abs(board.width - board.height)).toBeLessThanOrEqual(1);
+  // Real Chrome at DPR 1.5 reports 640.00003 for a 640 px board.
+  expect(board.width).toBeLessThanOrEqual(641);
+  expect(board.width).toBeGreaterThanOrEqual(minBoard);
+  expect(board.x).toBeGreaterThanOrEqual(0);
+  expect(board.x + board.width).toBeLessThanOrEqual(viewport.width);
+
+  if (viewport.width >= 900) {
+    expect(panel.x).toBeGreaterThanOrEqual(board.x + board.width);
+    expect(panel.x + panel.width).toBeLessThanOrEqual(viewport.width);
+  } else {
+    expect(panel.y).toBeGreaterThanOrEqual(board.y + board.height);
+  }
+}
 
 test.describe('single-screen layout', () => {
   test('fits the viewport without horizontal scroll', async ({ page }, testInfo) => {
     await openBoard(page);
-
-    const overflow = await page.evaluate(() => ({
-      scrollWidth: document.documentElement.scrollWidth,
-      clientWidth: document.documentElement.clientWidth,
-    }));
-    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
-
-    const board = await page.getByTestId('board').boundingBox();
-    const panel = await page.getByTestId('panel').boundingBox();
-    expect(board).not.toBeNull();
-    expect(panel).not.toBeNull();
-    if (!board || !panel) return;
-
-    expect(Math.abs(board.width - board.height)).toBeLessThanOrEqual(1);
-    expect(board.width).toBeLessThanOrEqual(640);
-    expect(board.width).toBeGreaterThan(200);
-
-    const viewport = page.viewportSize();
-    if (!viewport) throw new Error('viewport unknown');
-    if (viewport.width >= 900) {
-      expect(panel.x).toBeGreaterThanOrEqual(board.x + board.width);
-    } else {
-      expect(panel.y).toBeGreaterThanOrEqual(board.y + board.height);
-    }
+    await expectBoardFits(page, 200);
 
     // Every interactive control is a real tap target.
     const controls = page.locator('button, a, select');
@@ -50,5 +59,21 @@ test.describe('single-screen layout', () => {
       path: `test-results/screens/${testInfo.project.name}.png`,
       fullPage: true,
     });
+  });
+
+  test('two columns fit at the narrow end of the desktop breakpoint', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'viewport override only makes sense on desktop');
+    await page.setViewportSize({ width: 960, height: 900 });
+    await openBoard(page);
+    await expectBoardFits(page, 300);
+  });
+
+  test('a landscape phone keeps a usable single-column board', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop', 'viewport override only makes sense on desktop');
+    await page.setViewportSize({ width: 844, height: 390 });
+    await openBoard(page);
+    await expectBoardFits(page, 300);
   });
 });

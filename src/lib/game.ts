@@ -9,8 +9,12 @@ export interface Move {
   promotion?: Promotion;
 }
 
-/** Immutable snapshot of a game. `history` is the SAN move list from the initial position. */
+/**
+ * Immutable snapshot of a game. `history` is the SAN move list played from `start`, the FEN
+ * the game began at (the initial position unless the state was built with `fromFen`).
+ */
 export interface GameState {
+  start: string;
   fen: string;
   history: string[];
   turn: Color;
@@ -20,19 +24,14 @@ export interface GameState {
 
 export const INITIAL_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
-function fromHistory(history: string[]): Chess {
-  const chess = new Chess();
+function fromHistory(start: string, history: string[]): Chess {
+  const chess = new Chess(start);
   for (const san of history) chess.move(san);
   return chess;
 }
 
 function fromState(state: GameState): Chess {
-  if (state.history.length === 0 && state.fen !== INITIAL_FEN) {
-    const chess = new Chess();
-    chess.load(state.fen);
-    return chess;
-  }
-  return fromHistory(state.history);
+  return fromHistory(state.start, state.history);
 }
 
 function resultOf(chess: Chess): string | null {
@@ -41,8 +40,9 @@ function resultOf(chess: Chess): string | null {
   return null;
 }
 
-function snapshot(chess: Chess): GameState {
+function snapshot(chess: Chess, start: string): GameState {
   return {
+    start,
     fen: chess.fen(),
     history: chess.history(),
     turn: chess.turn(),
@@ -52,14 +52,13 @@ function snapshot(chess: Chess): GameState {
 }
 
 export function newGame(): GameState {
-  return snapshot(new Chess());
+  return snapshot(new Chess(), INITIAL_FEN);
 }
 
 /** Builds a state from an arbitrary FEN (no history). Used by tests and future share links. */
 export function fromFen(fen: string): GameState {
-  const chess = new Chess();
-  chess.load(fen);
-  return snapshot(chess);
+  const chess = new Chess(fen);
+  return snapshot(chess, chess.fen());
 }
 
 /** Destination squares of every legal move from `from` (deduplicated across promotions). */
@@ -84,18 +83,25 @@ export function applyMove(state: GameState, move: Move): GameState | null {
   } catch {
     return null;
   }
-  return snapshot(chess);
+  return snapshot(chess, state.start);
+}
+
+/** True when the human has at least one ply of their own in `history` that undo can remove. */
+export function canUndo(state: GameState, human: Color): boolean {
+  return state.history.length >= (human === 'b' ? 2 : 1);
 }
 
 /**
  * Undoes moves until it is the human's turn again with at least one human move removed:
  * two plies when it is already the human's turn, one when the opponent is to move.
+ * Returns `state` unchanged when the human has not moved yet (as black, the opponent's
+ * opening ply stays on the board).
  */
 export function undoPair(state: GameState, human: Color): GameState {
-  if (state.history.length === 0) return state;
+  if (!canUndo(state, human)) return state;
   const plies = state.turn === human ? 2 : 1;
   const history = state.history.slice(0, Math.max(0, state.history.length - plies));
-  return snapshot(fromHistory(history));
+  return snapshot(fromHistory(state.start, history), state.start);
 }
 
 const DEFAULT_HEADERS: Record<string, string> = {

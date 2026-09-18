@@ -23,6 +23,8 @@ const PREFERRED = [
   'c4d5',
 ];
 
+const BLACK_PREFERRED = ['e7e5', 'd7d5', 'g8f6', 'b8c6', 'f8c5', 'c8e6', 'd8d7', 'e8g8'];
+
 /**
  * Plans `count` human moves against the deterministic "first legal move" opponent, returning
  * the full ply sequence (human, opponent, human, ...) with SAN for the move-list assertions.
@@ -41,6 +43,32 @@ export function planGame(count: number): Uci[] {
     const reply = chess.moves({ verbose: true })[0];
     const replied = chess.move({ from: reply.from, to: reply.to, promotion: reply.promotion });
     plies.push({ from: replied.from, to: replied.to, san: replied.san });
+  }
+  return plies;
+}
+
+/**
+ * Same as `planGame` with the human playing black: the opponent opens (ply 1) and the human
+ * answers on the even plies. Returns `count` human moves, i.e. `2 * count + 1` plies.
+ */
+export function planGameAsBlack(count: number): Uci[] {
+  const chess = new Chess();
+  const plies: Uci[] = [];
+  const opponent = () => {
+    const reply = chess.moves({ verbose: true })[0];
+    const replied = chess.move({ from: reply.from, to: reply.to, promotion: reply.promotion });
+    plies.push({ from: replied.from, to: replied.to, san: replied.san });
+  };
+  opponent();
+  for (let i = 0; i < count; i += 1) {
+    const legal = chess.moves({ verbose: true });
+    const chosen =
+      BLACK_PREFERRED.map((uci) =>
+        legal.find((move) => `${move.from}${move.to}` === uci && !move.promotion),
+      ).find((move) => move !== undefined) ?? legal[0];
+    const played = chess.move({ from: chosen.from, to: chosen.to, promotion: chosen.promotion });
+    plies.push({ from: played.from, to: played.to, san: played.san });
+    opponent();
   }
   return plies;
 }

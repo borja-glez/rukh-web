@@ -59,7 +59,8 @@ declare module 'cm-chessboard/src/Chessboard.js' {
     constructor(context: HTMLElement, props?: ChessboardProps);
     setPosition(fen: string, animated?: boolean): Promise<void>;
     movePiece(from: string, to: string, animated?: boolean): Promise<void>;
-    setOrientation(color: 'w' | 'b', animated?: boolean): Promise<void>;
+    setOrientation(color: 'w' | 'b', animated?: boolean): Promise<void> | undefined;
+    getOrientation(): 'w' | 'b';
     getPosition(): string;
     getPiece(square: string): string | undefined;
     enableMoveInput(handler: (event: MoveInputEvent) => boolean | void, color?: 'w' | 'b'): void;

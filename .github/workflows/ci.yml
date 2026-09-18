@@ -2,8 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main, p0-scaffold]
+    branches: ['**']
   pull_request:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

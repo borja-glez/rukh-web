@@ -4,16 +4,9 @@
 @import './tokens.css';
 
 :root {
-  /* Vertical space reserved around the board besides the header: on a single column the
-     panel sits under the board; on two columns only the footer strip remains. */
-  --controls-h: 220px;
   --tap: 44px;
-}
-
-@media (min-width: 900px) {
-  :root {
-    --controls-h: 96px;
-  }
+  /* Panel column plus the grid gap on two columns (see `.play` at >= 900 px). */
+  --panel-w: 352px;
 }
 
 *,
@@ -182,7 +175,7 @@ select {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  padding-top: var(--header-h);
+  padding-top: calc(var(--header-h) + env(safe-area-inset-top));
   padding-bottom: env(safe-area-inset-bottom);
 }
 
@@ -192,6 +185,8 @@ select {
   max-width: 1080px;
   margin: 0 auto;
   padding: 16px var(--gutter) 24px;
+  padding-inline: max(var(--gutter), env(safe-area-inset-left))
+    max(var(--gutter), env(safe-area-inset-right));
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 20px;
@@ -199,8 +194,10 @@ select {
   align-content: start;
 }
 
+/* Single column: the panel stacks below and the page scrolls, so only the width limits the
+   board (a landscape phone keeps a usable board instead of one squeezed by the height). */
 .board {
-  --board-size: min(100vw - 2 * var(--gutter), 100dvh - var(--header-h) - var(--controls-h), 640px);
+  --board-size: min(100vw - 2 * var(--gutter), 640px);
   width: var(--board-size);
   max-width: 100%;
   aspect-ratio: 1;
@@ -215,6 +212,7 @@ select {
   gap: 16px;
 }
 
+/* Two columns: the board leaves room for the panel column and fits the viewport height. */
 @media (min-width: 900px) {
   .play {
     grid-template-columns: auto 320px;
@@ -223,10 +221,18 @@ select {
     gap: 32px;
   }
 
+  .board {
+    --board-size: min(
+      100vw - 2 * var(--gutter) - var(--panel-w),
+      100dvh - var(--header-h) - 2 * var(--gutter),
+      640px
+    );
+  }
+
   .panel {
     max-width: none;
     position: sticky;
-    top: calc(var(--header-h) + 16px);
+    top: calc(var(--header-h) + env(safe-area-inset-top) + 16px);
   }
 }
 
@@ -273,10 +279,6 @@ select {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-}
-
-.model__new {
-  width: 100%;
 }
 
 .moves__list {

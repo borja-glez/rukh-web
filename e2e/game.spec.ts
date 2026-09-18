@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { dragMove, openBoard, planGame, ply, tapMove } from './helpers';
+import { dragMove, openBoard, planGame, planGameAsBlack, ply, tapMove, waitIdle } from './helpers';
 
 test.describe('game against the first-legal-move opponent', () => {
   test('plays 10 human moves by tapping origin and destination', async ({ page, hasTouch }) => {
@@ -34,7 +34,7 @@ test.describe('game against the first-legal-move opponent', () => {
     expect(pgn).toContain('1. e4');
 
     // New game clears the list and the board.
-    await page.getByRole('button', { name: 'Nueva partida' }).first().click();
+    await page.getByRole('button', { name: 'Nueva partida' }).click();
     await expect(list.locator('[data-ply]')).toHaveCount(0);
     await expect(list).toContainText('Sin jugadas');
     await expect(page.getByTestId('status')).toHaveText('Te toca mover');
@@ -51,6 +51,38 @@ test.describe('game against the first-legal-move opponent', () => {
     await page.goto('/?mock=1&color=b');
     await expect(ply(page, 1)).toHaveText('a3');
     await expect(page.getByTestId('status')).toHaveText('Te toca mover');
+  });
+
+  test('undo as black never removes the opening ply alone', async ({ page, hasTouch }) => {
+    await page.goto('/?mock=1&color=b');
+    const list = page.getByTestId('move-list');
+    const undo = page.getByRole('button', { name: 'Deshacer' });
+    await expect(ply(page, 1)).toHaveText('a3');
+    await expect(page.getByTestId('status')).toHaveText('Te toca mover');
+    await waitIdle(page);
+
+    // Before the human has moved there is nothing of theirs to undo.
+    await expect(undo).toBeDisabled();
+    await undo.click({ force: true });
+    await expect(list.locator('[data-ply]')).toHaveCount(1);
+    await expect(page.getByTestId('status')).toHaveText('Te toca mover');
+
+    // The board still accepts input: two human moves, each answered by the opponent.
+    const plies = planGameAsBlack(2);
+    await tapMove(page, plies[1], hasTouch);
+    await expect(ply(page, 2)).toHaveText(plies[1].san);
+    await expect(ply(page, 3)).toHaveText(plies[2].san);
+    await tapMove(page, plies[3], hasTouch);
+    await expect(ply(page, 4)).toHaveText(plies[3].san);
+    await expect(ply(page, 5)).toHaveText(plies[4].san);
+    await expect(list.locator('[data-ply]')).toHaveCount(5);
+
+    // Undo removes one pair (human + opponent) and leaves the human to move.
+    await expect(undo).toBeEnabled();
+    await undo.click();
+    await expect(list.locator('[data-ply]')).toHaveCount(3);
+    await expect(page.getByTestId('status')).toHaveText('Te toca mover');
+    await waitIdle(page);
   });
 
   test('moves a piece by dragging', async ({ page, hasTouch }) => {

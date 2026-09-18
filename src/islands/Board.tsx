@@ -5,6 +5,8 @@ import { legalTargets, needsPromotion, type Color, type GameState, type Move } f
 interface Props {
   game: Signal<GameState>;
   human: Signal<Color>;
+  /** Set while the board animates an orientation change. */
+  turning: Signal<boolean>;
   /** Applies the human move; returns false when it is rejected. */
   onMove: (move: Move) => boolean;
 }
@@ -14,7 +16,7 @@ interface Props {
  * import time), the sprites are served from /pieces and /extensions (copied by
  * scripts/copy-assets.mjs) and the theme lives in src/styles/board.css.
  */
-export default function Board({ game, human, onMove }: Props) {
+export default function Board({ game, human, turning, onMove }: Props) {
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -131,25 +133,44 @@ export default function Board({ game, human, onMove }: Props) {
       // notation in `alt`; `aria-label` is what assistive tech reads for role="img").
       element.querySelector('svg.cm-chessboard')?.setAttribute('aria-label', 'Tablero de ajedrez');
 
+      // cm-chessboard rejects a second setOrientation while one is queued: chain them and,
+      // once a turn finishes, re-apply the latest colour if it changed meanwhile.
+      const orientationOf = (color: Color) => (color === 'w' ? COLOR.white : COLOR.black);
+      let turn: Promise<void> = Promise.resolve();
+      const orient = () => {
+        turn = turn.then(async () => {
+          if (disposed) return;
+          const wanted = orientationOf(human.value);
+          if (board.getOrientation() === wanted) return;
+          turning.value = true;
+          try {
+            await board.setOrientation(wanted, false);
+          } finally {
+            if (disposed || board.getOrientation() === orientationOf(human.value)) {
+              turning.value = false;
+            } else {
+              orient();
+            }
+          }
+        });
+      };
+
       // Input is toggled only when the game ends or the human changes colour: `computed`
       // keeps the effect from re-running (and interrupting cm-chessboard) on every move.
       const over = computed(() => game.value.over);
-      let orientation = human.value;
       const stopInput = effect(() => {
         const finished = over.value;
         const color = human.value;
         if (board.isMoveInputEnabled()) board.disableMoveInput();
         clearTargets();
-        if (color !== orientation) {
-          orientation = color;
-          void board.setOrientation(color === 'w' ? COLOR.white : COLOR.black, false);
-        }
-        if (!finished) board.enableMoveInput(handler, color === 'w' ? COLOR.white : COLOR.black);
+        orient();
+        if (!finished) board.enableMoveInput(handler, orientationOf(color));
       });
 
       dispose = () => {
         stopPosition();
         stopInput();
+        turning.value = false;
         board.destroy();
       };
     })();
@@ -158,7 +179,7 @@ export default function Board({ game, human, onMove }: Props) {
       disposed = true;
       dispose?.();
     };
-  }, [game, human, onMove]);
+  }, [game, human, turning, onMove]);
 
   return (
     <div class="board" data-testid="board" data-busy="true">
