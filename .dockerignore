@@ -1,0 +1,10 @@
+node_modules
+dist
+.astro
+.git
+.lighthouseci
+lighthouse-reports
+playwright-report
+test-results
+e2e
+tests
