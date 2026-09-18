@@ -10,3 +10,6 @@ public/pieces/
 public/extensions/
 src/styles/tokens.css
 src/scripts/theme-init.js
+src/lib/chess-lm/vocab.json
+src/lib/chess-lm/bpe.json
+src/lib/chess-lm/fixtures/games.json

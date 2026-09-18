@@ -41,7 +41,7 @@ it is legal.
 | `pnpm lighthouse`                   | Lighthouse CI, mobile then desktop, >= 0.95 in the four categories |
 | `pnpm sync:tokens [--from <src>]`   | Copies `tokens.css` from `../rukh-lab` (or a URL) and updates lock |
 | `pnpm tokens:hash [--write]`        | Prints (or stores) the sha256 of `src/styles/tokens.css`           |
-| `pnpm sync:tokenizer`               | Syncs the UCI tokenizer from the Hub (arrives in P1)               |
+| `pnpm sync:tokenizer [--from <u>]`  | Copies the tokenizer artifacts from `../rukh` (or a base URL)      |
 
 Run `pnpm exec playwright install chromium` once before `pnpm e2e`.
 
@@ -50,6 +50,28 @@ Run `pnpm exec playwright install chromium` once before `pnpm e2e`.
 `/?mock=1` plays against a deterministic opponent that answers with the first legal move in
 `chess.js` order. It is what the E2E tests use and, in P0, the only opponent. `?color=b` makes you
 play black (the opponent moves first).
+
+## Tokenizers
+
+`src/lib/chess-lm/` is the TypeScript twin of the Python tokenizers in `rukh/src/rukh/tokenize/`.
+The demo (and the course playground) uses it to turn the game into the ids the model expects.
+
+- `tokenizer.ts`: the fixed UCI vocabulary, a deterministic enumeration that needs no data: 8
+  specials (`<pad> <bos> <eos> <mask> <unk> <1-0> <0-1> <1/2>`), 27 white and 27 black Elo bins
+  (`<w0600>`...`<w3200>`, `<b0600>`...`<b3200>`, 100 Elo wide, clamped), then the 1792 `fromto`
+  moves reachable by a queen or a knight and the 176 promotions, 2030 tokens in total.
+  `UciTokenizer.encodeGame(uci, whiteElo, blackElo, result, maxLen)` produces
+  `[<bos>, <wXXXX>, <bXXXX>, ...moves, <result>, <eos>]`.
+- `san-chars.ts`: character-level tokenizer for numbered SAN (`1.e4 e5 2.Nf3 ...`).
+- `bpe.ts`: applies a BPE model trained with Hugging Face `tokenizers` (whitespace split, merges
+  by rank) from its `tokenizer.json`.
+
+`pnpm sync:tokenizer` copies `vocab.json`, `bpe.json` and `fixtures/games.json` from
+`../rukh/artifacts/tokenizer` into `src/lib/chess-lm/`; `--from <baseUrl>` downloads them
+instead (the default base is `https://huggingface.co/chorcat/rukh-tokenizer/resolve/main`).
+`tests/parity.test.ts` checks that the three TypeScript tokenizers reproduce, id by id, what
+Python exported for the 20 fixture games; the synced files are committed so the tests run
+without the ML repo.
 
 ## Where the model comes from
 
@@ -68,6 +90,7 @@ src/lib/game.ts           pure rules wrapper: applyMove, undoPair, toPgn, legalT
 src/lib/opponent.ts       Opponent interface + firstLegalMove
 src/lib/registry.ts       model stages (only `mock` in P0)
 src/lib/query.ts          ?mock, ?stage, ?color
+src/lib/chess-lm/         UCI, SAN char and BPE tokenizers + synced vocab, BPE and fixtures
 src/styles/tokens.css     design tokens copied from rukh-lab (hash-locked)
 src/styles/board.css      board theme derived from the tokens
 e2e/                      game, layout and a11y specs
