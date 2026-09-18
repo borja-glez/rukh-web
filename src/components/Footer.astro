@@ -1,0 +1,39 @@
+---
+const year = 2026;
+---
+
+<footer class="footer caption">
+  <span>rukh · borjaglez.com · {year}</span>
+  <span class="footer__licenses">
+    Modelos <a href="https://www.apache.org/licenses/LICENSE-2.0">Apache-2.0</a> · Datos
+    <a href="https://database.lichess.org/">CC0 (Lichess)</a> · Código
+    <a href="https://github.com/borja-glez/rukh-web">MIT</a>
+  </span>
+</footer>
+
+<style>
+  .footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 24px;
+    padding: 4px var(--gutter);
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .footer a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--tap);
+    min-width: var(--tap);
+    padding: 0 4px;
+    color: var(--ink-2);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .footer a:hover {
+    color: var(--brand);
+  }
+</style>

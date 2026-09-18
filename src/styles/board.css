@@ -1,0 +1,93 @@
+/* ------------------------------------------------------------------
+   Board theme (`cssClass: 'rukh'`) · colours derive from the design tokens
+   ------------------------------------------------------------------ */
+:root {
+  --board-light: light-dark(#e8edf3, #2b3a4e);
+  --board-dark: light-dark(#9fb3c8, #16202d);
+  --board-coord: var(--ink);
+}
+
+.board .cm-chessboard {
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.cm-chessboard.rukh .board .square.white {
+  fill: var(--board-light);
+}
+
+.cm-chessboard.rukh .board .square.black {
+  fill: var(--board-dark);
+}
+
+.cm-chessboard.rukh.border-type-none .board .border {
+  stroke-width: 0;
+  fill: var(--board-dark);
+}
+
+.cm-chessboard.rukh .coordinates {
+  pointer-events: none;
+  user-select: none;
+}
+
+.cm-chessboard.rukh .coordinates .coordinate {
+  font-family: var(--font-mono);
+  font-size: 7px;
+  cursor: default;
+  fill: var(--board-coord);
+}
+
+.cm-chessboard.rukh .coordinates .coordinate.black,
+.cm-chessboard.rukh .coordinates .coordinate.white {
+  fill: var(--board-coord);
+}
+
+/* Markers: legal targets as dots, selected square as a frame. */
+.cm-chessboard.rukh .markers .marker.marker-dot {
+  fill: var(--accent);
+  opacity: 0.6;
+}
+
+.cm-chessboard.rukh .markers .marker.marker-frame {
+  stroke: var(--accent);
+  stroke-width: 2.2px;
+  opacity: 0.95;
+}
+
+/* Promotion dialog: paper background, token border. */
+svg.cm-chessboard.rukh .promotion-dialog-group .promotion-dialog {
+  fill: var(--paper);
+  fill-opacity: 0.96;
+  stroke: var(--line);
+}
+
+svg.cm-chessboard.rukh .promotion-dialog-group .promotion-dialog-button:hover,
+svg.cm-chessboard.rukh
+  .promotion-dialog-group
+  .promotion-dialog-button-group:focus
+  .promotion-dialog-button {
+  fill: var(--hover-soft);
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+}
+
+.cm-chessboard:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cm-chessboard .keyboard-focus-indicator .keyboard-focus,
+.cm-chessboard .keyboard-focus-indicator .keyboard-from-square {
+  stroke: var(--accent);
+}
+
+.cm-chessboard-draggable-piece {
+  z-index: 50;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  svg.cm-chessboard .promotion-dialog-group rect,
+  svg.cm-chessboard .promotion-dialog-group g[data-piece] {
+    animation: none;
+  }
+}

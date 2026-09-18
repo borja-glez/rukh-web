@@ -2,6 +2,7 @@ node_modules/
 dist/
 .astro/
 .lighthouseci/
+lighthouse-reports/
 playwright-report/
 test-results/
 blob-report/

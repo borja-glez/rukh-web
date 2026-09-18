@@ -1,0 +1,12 @@
+dist/
+.astro/
+node_modules/
+.lighthouseci/
+lighthouse-reports/
+playwright-report/
+test-results/
+pnpm-lock.yaml
+public/pieces/
+public/extensions/
+src/styles/tokens.css
+src/scripts/theme-init.js

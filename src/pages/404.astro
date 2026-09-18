@@ -1,0 +1,38 @@
+---
+import Base from '../layouts/Base.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+---
+
+<Base title="Rukh · página no encontrada" description="Esta página no existe.">
+  <Header />
+  <main class="not-found" id="main">
+    <p class="label">404</p>
+    <h1>Página no encontrada</h1>
+    <p>La demo es una sola pantalla: el tablero está en la portada.</p>
+    <a class="btn btn--primary" href="/">
+      Ir al tablero
+    </a>
+  </main>
+  <Footer />
+</Base>
+
+<style>
+  .not-found {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 48px var(--gutter);
+  }
+
+  h1 {
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+</style>

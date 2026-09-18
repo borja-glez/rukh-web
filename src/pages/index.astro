@@ -1,0 +1,23 @@
+---
+import 'cm-chessboard/assets/chessboard.css';
+import 'cm-chessboard/assets/extensions/markers/markers.css';
+import 'cm-chessboard/assets/extensions/promotion-dialog/promotion-dialog.css';
+import '../styles/board.css';
+import Base from '../layouts/Base.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import App from '../islands/App';
+
+const title = 'Rukh · juega contra el modelo';
+const description =
+  'Juega al ajedrez contra Rukh, un modelo de lenguaje de ajedrez entrenado desde cero. Tablero, panel del modelo y lista de jugadas en una sola pantalla.';
+---
+
+<Base title={title} description={description}>
+  <Header />
+  <main class="play" id="main">
+    <h1 class="visually-hidden">Rukh · juega contra el modelo</h1>
+    <App client:load />
+  </main>
+  <Footer />
+</Base>

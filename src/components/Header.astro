@@ -1,0 +1,155 @@
+---
+const courseUrl = 'https://lab.rukh.borjaglez.com';
+---
+
+<header class="header">
+  <a class="brand mono" href="/" aria-label="Rukh, inicio">
+    <span class="brand__mark" aria-hidden="true"></span>rukh
+  </a>
+  <nav class="header__right" aria-label="Principal">
+    <a class="nav-link" href={courseUrl}>
+      Curso
+    </a>
+    <div class="theme" role="group" aria-label="Tema">
+      <button
+        class="theme__item"
+        type="button"
+        data-theme-option="light"
+        aria-label="Tema claro"
+        title="Tema claro"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="4.5"></circle>
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M4.9 19.1l2.2-2.2M16.9 7.1l2.2-2.2"></path>
+        </svg>
+      </button>
+      <button
+        class="theme__item"
+        type="button"
+        data-theme-option="dark"
+        aria-label="Tema oscuro"
+        title="Tema oscuro"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"></path>
+        </svg>
+      </button>
+    </div>
+  </nav>
+</header>
+
+<style>
+  .header {
+    position: fixed;
+    inset: 0 0 auto;
+    z-index: 40;
+    height: var(--header-h);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 var(--gutter);
+    background: var(--header-bg);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-height: var(--tap);
+    min-width: var(--tap);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .brand__mark {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: var(--accent);
+  }
+
+  .header__right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .nav-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--tap);
+    padding: 0 12px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .nav-link:hover {
+    color: var(--brand);
+  }
+
+  .theme {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+  }
+
+  .theme__item {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--tap);
+    height: var(--tap);
+    min-width: var(--tap);
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition:
+      background-color 0.2s ease,
+      color 0.2s ease;
+  }
+
+  .theme__item svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .theme__item:hover {
+    color: var(--ink);
+  }
+
+  /* Active state resolved with CSS only (no flash): the chosen scheme or the system one. */
+  html[data-theme='light'] .theme__item[data-theme-option='light'],
+  html[data-theme='dark'] .theme__item[data-theme-option='dark'] {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  @media (prefers-color-scheme: light) {
+    html:not([data-theme]) .theme__item[data-theme-option='light'] {
+      background: var(--ink);
+      color: var(--paper);
+    }
+  }
+
+  @media (prefers-color-scheme: dark) {
+    html:not([data-theme]) .theme__item[data-theme-option='dark'] {
+      background: var(--ink);
+      color: var(--paper);
+    }
+  }
+</style>

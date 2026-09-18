@@ -1,0 +1,73 @@
+/* ------------------------------------------------------------------
+   Rukh design tokens
+   ------------------------------------------------------------------
+   Copied from the borjaglez.com portfolio (src/styles/global.css).
+   Source of truth: rukh-lab/docs/design-system.md. The demo (rukh-web)
+   keeps a synced copy checked by a hash test. Edit there first, then run
+   `pnpm sync:tokens` in rukh-web.
+
+   Each token carries its light/dark pair with light-dark(). The active
+   scheme is decided by `color-scheme` on <html>: the system one by default,
+   or the one chosen by the user via data-theme="light" | "dark".
+   ------------------------------------------------------------------ */
+:root {
+  --paper: light-dark(#f4f6f9, #0e1622);
+  --ink: light-dark(#14243a, #e6ecf3);
+  --ink-2: light-dark(#3d4f66, #b4c0cf);
+  --muted: light-dark(#5b6b80, #8494a8);
+  --line: light-dark(#c5cfdc, #2b3a4e);
+  --line-soft: light-dark(#dde4ec, #1e2a3a);
+  --diagram-stroke: light-dark(#8fa3bc, #55697f);
+  --brand: light-dark(#1a5276, #7fb3d9);
+  --accent: #f2a23a;
+  --accent-text: light-dark(#b86a0b, #f2a23a);
+  --event: light-dark(#3f7cac, #6fa8d6);
+  --ok: light-dark(#1f5c46, #5fbf95);
+  --hover-soft: light-dark(#e6edf4, #1b2636);
+  --grid-dot: light-dark(#d3dbe6, #1d2939);
+  --selection-fg: #14243a;
+
+  --split-1: light-dark(#14243a, #e6ecf3);
+  --split-2: light-dark(#1a5276, #a9c4dc);
+  --split-3: light-dark(#3f7cac, #6fa8d6);
+  --split-4: light-dark(#8fb3d1, #3f7cac);
+  --split-5: light-dark(#c5d6e6, #24476b);
+
+  --frame-bg: light-dark(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.03));
+  --chip-bg: light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.04));
+  --box-fill: light-dark(#ffffff, #121c2b);
+  --card-hover: light-dark(#ffffff, #15202f);
+  --header-bg: light-dark(rgba(244, 246, 249, 0.82), rgba(14, 22, 34, 0.82));
+
+  --gutter: clamp(20px, 4vw, 48px);
+  --gutter-rail: clamp(72px, 10vw, 140px);
+  --section-gap: clamp(80px, 12vh, 140px);
+  --header-h: 56px;
+  --container: 1180px;
+
+  --text-body: clamp(16px, 1.25vw, 18px);
+}
+
+html {
+  color-scheme: light dark;
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+@media (max-width: 720px) {
+  :root {
+    --gutter-rail: 20px;
+  }
+}
+
+@media (min-width: 1440px) {
+  :root {
+    --container: 1280px;
+  }
+}

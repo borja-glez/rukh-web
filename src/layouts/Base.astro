@@ -1,0 +1,55 @@
+---
+import { Font } from 'astro:assets';
+// Emitted verbatim: its sha256 is allow-listed in astro.config.mjs (tests/theme-script-hash.test.ts).
+import themeInit from '../scripts/theme-init.js?raw';
+import '../styles/base.css';
+
+interface Props {
+  title: string;
+  description: string;
+}
+
+const { title, description } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+const ogImage = new URL('/og-default.png', Astro.site);
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="generator" content={Astro.generator} />
+    <script is:inline set:html={themeInit}></script>
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="sitemap" href="/sitemap-index.xml" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="theme-color" content="#f4f6f9" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="es_ES" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    <Font cssVariable="--font-display" preload={[{ subset: 'latin' }]} />
+    <Font cssVariable="--font-mono" />
+  </head>
+  <body>
+    <div class="page">
+      <slot />
+    </div>
+    <script>
+      import '../scripts/theme';
+    </script>
+  </body>
+</html>
