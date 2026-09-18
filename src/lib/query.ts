@@ -1,5 +1,5 @@
 import type { Color } from './game';
-import { findStage, STAGES } from './registry';
+import { defaultStageId, detectConditions, findStage } from './registry';
 
 export interface Query {
   mock: boolean;
@@ -9,17 +9,19 @@ export interface Query {
 
 /**
  * Parses the page query string. `mock` is forced by `?mock=1` and is also true when the
- * requested stage is unknown or is itself a mock; in P0 every stage is a mock, so `mock`
- * is always true. `?color=b` makes the human play black.
+ * requested stage is unknown or is itself the mock, so the E2E suite never downloads anything.
+ * Without `?stage=` the default comes from the device (`small-int8` on mobile or with data
+ * saver on, `small-fp16` otherwise) and nothing is fetched until the user consents.
+ * `?color=b` makes the human play black.
  */
-export function parseQuery(search: string): Query {
+export function parseQuery(search: string, fallback = defaultStageId(detectConditions())): Query {
   const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
-  const requested = params.get('stage') ?? STAGES[0].id;
-  const stage = findStage(requested);
+  const requested = params.get('stage') ?? fallback;
+  const stage = findStage(requested) ?? findStage(fallback);
   const mock = params.get('mock') === '1' || stage === undefined || stage.kind === 'mock';
   return {
     mock,
-    stage: stage?.id ?? STAGES[0].id,
+    stage: mock ? 'mock' : (stage?.id ?? fallback),
     color: params.get('color') === 'b' ? 'b' : 'w',
   };
 }

@@ -6,6 +6,8 @@ interface Props {
   game: Signal<GameState>;
   human: Signal<Color>;
   busy: Signal<boolean>;
+  /** Raw token of the last illegal proposal (unmasked mode), or null. */
+  illegal: Signal<string | null>;
   onUndo: () => void;
   onNewGame: () => void;
   onExport: () => string;
@@ -46,7 +48,15 @@ async function download(pgn: string) {
   }
 }
 
-export default function MoveList({ game, human, busy, onUndo, onNewGame, onExport }: Props) {
+export default function MoveList({
+  game,
+  human,
+  busy,
+  illegal,
+  onUndo,
+  onNewGame,
+  onExport,
+}: Props) {
   const { history } = game.value;
   const rows = pairs(history);
   const current = history.length - 1;
@@ -91,6 +101,11 @@ export default function MoveList({ game, human, busy, onUndo, onNewGame, onExpor
           ))
         )}
       </ol>
+      {illegal.value ? (
+        <p class="moves__illegal caption" data-testid="illegal">
+          Propuesta ilegal: <span class="mono">{illegal.value}</span> · no se juega
+        </p>
+      ) : null}
       <p class="visually-hidden" aria-live="polite" data-testid="last-move">
         {describeLast(history)}
       </p>

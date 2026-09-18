@@ -2,3 +2,5 @@
 *.png binary
 *.svg text
 *.zip binary
+*.onnx binary
+*.wasm binary

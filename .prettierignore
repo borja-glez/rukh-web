@@ -8,6 +8,8 @@ test-results/
 pnpm-lock.yaml
 public/pieces/
 public/extensions/
+public/ort/
+public/test/
 src/styles/tokens.css
 src/scripts/theme-init.js
 src/lib/chess-lm/vocab.json

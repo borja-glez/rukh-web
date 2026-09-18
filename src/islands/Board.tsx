@@ -1,22 +1,38 @@
 import { computed, effect, type Signal } from '@preact/signals';
 import { useEffect, useRef } from 'preact/hooks';
 import { legalTargets, needsPromotion, type Color, type GameState, type Move } from '../lib/game';
+import type { TopEntry } from '../lib/model';
 
 interface Props {
   game: Signal<GameState>;
   human: Signal<Color>;
   /** Set while the board animates an orientation change. */
   turning: Signal<boolean>;
+  /** The five moves the network proposed last, drawn as arrows when `arrows` is on. */
+  top5: Signal<TopEntry[]>;
+  /** Drawer toggle for the top-5 arrows; off by default. */
+  arrows: Signal<boolean>;
   /** Applies the human move; returns false when it is rejected. */
   onMove: (move: Move) => boolean;
 }
+
+/**
+ * Arrow class by probability: five buckets, opacity rising with the probability (the theme
+ * lives in `src/styles/board.css`, so nothing needs an inline style).
+ */
+function arrowType(prob: number): { class: string } {
+  const bucket = Math.min(5, Math.max(1, Math.ceil(prob * 5)));
+  return { class: `arrow-rukh arrow-rukh-${bucket}` };
+}
+
+const ARROW_MOVE = /^([a-h][1-8])([a-h][1-8])/;
 
 /**
  * cm-chessboard wrapper. The library is loaded on the client only (it touches the DOM at
  * import time), the sprites are served from /pieces and /extensions (copied by
  * scripts/copy-assets.mjs) and the theme lives in src/styles/board.css.
  */
-export default function Board({ game, human, turning, onMove }: Props) {
+export default function Board({ game, human, turning, top5, arrows, onMove }: Props) {
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -31,11 +47,13 @@ export default function Board({ game, human, turning, onMove }: Props) {
         { Markers, MARKER_TYPE },
         { PromotionDialog },
         { Accessibility },
+        { Arrows },
       ] = await Promise.all([
         import('cm-chessboard/src/Chessboard.js'),
         import('cm-chessboard/src/extensions/markers/Markers.js'),
         import('cm-chessboard/src/extensions/promotion-dialog/PromotionDialog.js'),
         import('cm-chessboard/src/extensions/accessibility/Accessibility.js'),
+        import('cm-chessboard/src/extensions/arrows/Arrows.js'),
       ]);
       if (disposed) return;
 
@@ -54,6 +72,7 @@ export default function Board({ game, human, turning, onMove }: Props) {
         extensions: [
           { class: Markers, props: { autoMarkers: MARKER_TYPE.frame } },
           { class: PromotionDialog },
+          { class: Arrows },
           {
             class: Accessibility,
             props: {
@@ -167,7 +186,19 @@ export default function Board({ game, human, turning, onMove }: Props) {
         if (!finished) board.enableMoveInput(handler, orientationOf(color));
       });
 
+      // Top-5 arrows: redrawn whenever the proposals or the toggle change, cleared otherwise.
+      const stopArrows = effect(() => {
+        const entries = arrows.value ? top5.value : [];
+        board.removeArrows();
+        for (const entry of entries) {
+          const parsed = ARROW_MOVE.exec(entry.uci);
+          if (!parsed) continue;
+          board.addArrow(arrowType(entry.prob), parsed[1], parsed[2]);
+        }
+      });
+
       dispose = () => {
+        stopArrows();
         stopPosition();
         stopInput();
         turning.value = false;
@@ -179,7 +210,7 @@ export default function Board({ game, human, turning, onMove }: Props) {
       disposed = true;
       dispose?.();
     };
-  }, [game, human, turning, onMove]);
+  }, [game, human, turning, top5, arrows, onMove]);
 
   return (
     <div class="board" data-testid="board" data-busy="true">

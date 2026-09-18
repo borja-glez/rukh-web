@@ -91,3 +91,34 @@ svg.cm-chessboard.rukh
     animation: none;
   }
 }
+
+/* Top-5 arrows (drawer toggle): five opacity buckets by probability. */
+.cm-chessboard.rukh .arrows .arrow-rukh .arrow-line {
+  stroke: var(--accent);
+  stroke-linecap: round;
+}
+
+.cm-chessboard.rukh .arrows .arrow-rukh .arrow-head {
+  fill: var(--accent);
+  fill-rule: nonzero;
+}
+
+.cm-chessboard.rukh .arrows .arrow-rukh-1 {
+  opacity: 0.25;
+}
+
+.cm-chessboard.rukh .arrows .arrow-rukh-2 {
+  opacity: 0.4;
+}
+
+.cm-chessboard.rukh .arrows .arrow-rukh-3 {
+  opacity: 0.55;
+}
+
+.cm-chessboard.rukh .arrows .arrow-rukh-4 {
+  opacity: 0.7;
+}
+
+.cm-chessboard.rukh .arrows .arrow-rukh-5 {
+  opacity: 0.85;
+}

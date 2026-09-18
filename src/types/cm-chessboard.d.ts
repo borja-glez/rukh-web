@@ -49,6 +49,10 @@ declare module 'cm-chessboard/src/Chessboard.js' {
     position?: string;
   }
 
+  export interface ArrowType {
+    class: string;
+  }
+
   export interface PromotionDialogResult {
     type: 'pieceSelected' | 'canceled';
     square?: string;
@@ -77,6 +81,9 @@ declare module 'cm-chessboard/src/Chessboard.js' {
       callback: (result: PromotionDialogResult) => void,
     ): void;
     isPromotionDialogShown(): boolean;
+    // Provided by the Arrows extension.
+    addArrow(type: ArrowType, from: string, to: string): void;
+    removeArrows(type?: ArrowType, from?: string, to?: string): void;
   }
 }
 
@@ -107,4 +114,17 @@ declare module 'cm-chessboard/src/extensions/promotion-dialog/PromotionDialog.js
 
 declare module 'cm-chessboard/src/extensions/accessibility/Accessibility.js' {
   export class Accessibility {}
+}
+
+declare module 'cm-chessboard/src/extensions/arrows/Arrows.js' {
+  import type { ArrowType } from 'cm-chessboard/src/Chessboard.js';
+  export const ARROW_TYPE: {
+    default: ArrowType;
+    success: ArrowType;
+    secondary: ArrowType;
+    warning: ArrowType;
+    info: ArrowType;
+    danger: ArrowType;
+  };
+  export class Arrows {}
 }

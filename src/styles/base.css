@@ -338,3 +338,170 @@ select {
     height: 240px;
   }
 }
+
+/* ------------------------------------------------------------------
+   Model panel · consent, download progress and backend badge
+   ------------------------------------------------------------------ */
+.consent {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--box-fill);
+}
+
+.consent__text {
+  font-size: 14px;
+}
+
+.consent__warn {
+  color: var(--brand);
+}
+
+.model__loading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model__error {
+  color: var(--brand);
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* A native <progress> keeps the bars out of the CSP's way: no inline width anywhere. */
+.bar {
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--hover-soft);
+  color: var(--accent);
+}
+
+.bar::-webkit-progress-bar {
+  border-radius: 999px;
+  background: var(--hover-soft);
+}
+
+.bar::-webkit-progress-value {
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.bar::-moz-progress-bar {
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.moves__illegal {
+  color: var(--brand);
+}
+
+/* ------------------------------------------------------------------
+   "Más" drawer: closed by default, spans the grid under board and panel
+   ------------------------------------------------------------------ */
+.drawer {
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: 640px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--frame-bg);
+}
+
+.drawer__summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--tap);
+  padding: 0 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.drawer__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding: 0 16px 16px;
+}
+
+.drawer__block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.drawer__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.drawer__toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap);
+  font-size: 14px;
+}
+
+.drawer__toggle input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+
+.range {
+  width: 100%;
+  height: 24px;
+  accent-color: var(--accent);
+}
+
+.waterfall,
+.top5 {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.waterfall__row,
+.top5__row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.top5__uci {
+  font-size: 12px;
+}
+
+@media (min-width: 900px) {
+  .drawer__body {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .drawer {
+    max-width: none;
+  }
+}

@@ -6,10 +6,10 @@ and data pipeline live in `rukh` and the course in `rukh-lab` (lab.rukh.borjagle
 
 ## One screen
 
-The demo is a single screen and stays that way: the board, the model panel (stage, status, colour,
-new game) and the move list (SAN in pairs, undo, new game, export PGN). Later features (arena,
-puzzles, latency waterfall, unmasked mode, adapters) go behind a drawer or tabs without touching
-this screen.
+The demo is a single screen and stays that way: the board, the model panel (stage, Elo, consent,
+download progress, backend, status, colour) and the move list (SAN in pairs, undo, new game,
+export PGN). Everything else (sampling controls, unmasked mode, latency waterfall, top-5 arrows)
+lives in the **"Más" drawer**, closed by default, and never touches this screen.
 
 - Board size: `min(100vw - 2*gutter, 100dvh - header - controls, 640px)`; panel on the right from
   900 px, below the board under that. Never a horizontal scroll bar; `env(safe-area-inset-bottom)`.
@@ -21,9 +21,10 @@ this screen.
 ## Stack
 
 Astro 7 (static) with Preact islands and `@preact/signals`, [cm-chessboard](https://github.com/shaack/cm-chessboard)
-8 (MIT, SVG) for the board and [chess.js](https://github.com/jhlywa/chess.js) 1.4 (BSD-2) for the
-rules. TypeScript 6, pnpm 10, Node 24. Tests with Vitest, E2E with Playwright (three viewports),
-axe-core, Lighthouse CI; served by nginx from a multi-stage Docker image.
+8 (MIT, SVG) for the board, [chess.js](https://github.com/jhlywa/chess.js) 1.4 (BSD-2) for the
+rules and [onnxruntime-web](https://onnxruntime.ai/) 1.30 (MIT) for the model. TypeScript 6,
+pnpm 10, Node 24. Tests with Vitest, E2E with Playwright (three viewports), axe-core, Lighthouse
+CI; served by nginx from a multi-stage Docker image.
 
 The rules always run in the browser: the model only proposes a move and `chess.js` decides whether
 it is legal.
@@ -32,7 +33,7 @@ it is legal.
 
 | Script                              | What it does                                                       |
 | ----------------------------------- | ------------------------------------------------------------------ |
-| `pnpm dev` / `pnpm build`           | Dev server / static build (`prebuild` copies the board sprites)    |
+| `pnpm dev` / `pnpm build`           | Dev server / static build (`prebuild` copies sprites and ORT)      |
 | `pnpm preview`                      | Serves `dist/`                                                     |
 | `pnpm check` / `pnpm lint`          | `astro check` (TypeScript) / ESLint                                |
 | `pnpm format` / `pnpm format:check` | Prettier                                                           |
@@ -45,10 +46,74 @@ it is legal.
 
 Run `pnpm exec playwright install chromium` once before `pnpm e2e`.
 
+## Playing against the model
+
+### Stages
+
+`src/lib/registry.ts` is the single list of what you can play against, `mock` first so `?mock=1`
+always has somewhere to fall back to:
+
+| Stage        | Label                | Where it comes from                          | Size   |
+| ------------ | -------------------- | -------------------------------------------- | ------ |
+| `mock`       | Primera jugada legal | no download, first legal move                | 0 MB   |
+| `tiny-int8`  | Rukh tiny (int8)     | `chorcat/rukh-tiny`, `onnx/model-int8.onnx`  | ~6 MB  |
+| `small-fp16` | Rukh small (fp16)    | `chorcat/rukh-small`, `onnx/model-fp16.onnx` | ~80 MB |
+| `small-int8` | Rukh small (int8)    | `chorcat/rukh-small`, `onnx/model-int8.onnx` | ~40 MB |
+
+The sizes are **provisional**: they live in `STAGE_SIZE_MB`, in one place, and are updated once
+the real export reports the file sizes. `modelUrl(stage)` resolves to
+`https://huggingface.co/<repo>/resolve/main/<file>`. Without `?stage=` the default is
+`small-int8` on mobile or when `navigator.connection.saveData` is on, and `small-fp16` otherwise.
+`?stage=test` points at a 169 KB toy decoder in `public/test/`, which is how the E2E suite
+exercises the real worker path without touching the Hub.
+
+The Elo selector (1200-2400 in steps of 100) stays disabled until the Elo-conditioned checkpoints
+of M4 land; the prompt already carries both Elo tokens.
+
+### Consent
+
+Nothing is downloaded when the page loads. The model panel shows the stage, its size in MB, the
+model licence (Apache-2.0) and, when the browser reports `saveData`, an extra warning; the
+download starts only when you press **Jugar**. Weights are kept in the Cache API under a
+versioned bucket and "Borrar modelos descargados" empties it.
+
+### Worker, WebGPU and WASM
+
+`src/workers/decoder.worker.ts` is a dedicated module worker created at the call site in
+`decoder-client.ts` with the exact
+`new Worker(new URL('./decoder.worker.ts', import.meta.url), { type: 'module' })` shape Vite needs
+to emit it as its own chunk (`tests/worker-chunk.test.ts` fails if it is ever inlined as a `data:`
+URL). It streams the `.onnx` with `fetch` and a `ReadableStream`, reports the progress in MB,
+stores the bytes in the Cache API and then creates the session with
+`executionProviders: ['webgpu']`, falling back to `['wasm']`; the panel shows which one won.
+Sessions are created strictly in series and `run` calls go through a single promise chain, because
+the asyncify build of ORT cannot re-enter an async call.
+
+The ORT runtime is **self-hosted**: `scripts/copy-assets.mjs` (run by `predev` and `prebuild`)
+copies `ort-wasm-simd-threaded.asyncify.{mjs,wasm}` into `public/ort/<version>/`, writes a `.gz`
+sibling for nginx `gzip_static` and stops the build if the installed `onnxruntime-web` ever drifts
+from `ORT_VERSION` in `src/lib/worker-protocol.ts`. The worker points `ort.env.wasm.wasmPaths`
+there, a small Vite plugin in `astro.config.mjs` rewrites ORT's
+`new URL('...wasm', import.meta.url)` fallback to the same path so the bundler does not ship a
+second 27 MB copy, and `public/ort/` is git-ignored because it is generated. Multi-threaded WASM
+needs the COOP/COEP headers nginx sets; without cross-origin isolation the runtime stays
+single-threaded.
+
+### From the position to the move
+
+`src/lib/model.ts` is the TypeScript twin of `rukh/src/rukh/infer/sampler.py`: it builds
+`[<bos>, <wXXXX>, <bXXXX>, ...moves]` with the P1 `UciTokenizer` (context 200, oldest moves
+dropped first), asks the worker for the last step's logits, masks every token that is not a legal
+`chess.js` move with `-inf`, applies the temperature, truncates to the top k, samples
+(`temperature == 0` is the argmax) and returns the move, the top five of the very distribution it
+sampled and the three timings. With the drawer's "sin máscara" on, an illegal proposal is reported
+in the move list instead of being played and the move is drawn again with the mask on, so the game
+continues and the legality rate stays honest.
+
 ## Mock mode
 
 `/?mock=1` plays against a deterministic opponent that answers with the first legal move in
-`chess.js` order. It is what the E2E tests use and, in P0, the only opponent. `?color=b` makes you
+`chess.js` order, downloading nothing. It is what most of the E2E suite uses. `?color=b` makes you
 play black (the opponent moves first).
 
 ## Tokenizers
@@ -104,12 +169,6 @@ without the ML repo. Two details of the fixture are easy to get wrong:
   `<unk>` here, while `UciTokenizer.decode` in Python raises `IndexError`. The browser decodes
   whatever the model samples, so it must not crash on an out-of-range id.
 
-## Where the model comes from
-
-Nothing is downloaded until you press play. From P2 the demo loads ONNX exports from Hugging Face
-(`chorcat/rukh-*`) with `onnxruntime-web` in a worker (WebGPU, WASM fallback); weights are never
-committed to git. The `sizeMb` in `src/lib/registry.ts` drives the consent dialog.
-
 ## Layout
 
 ```
@@ -119,12 +178,19 @@ src/islands/Board.tsx     cm-chessboard + markers + promotion + accessibility
 src/islands/ModelPanel.tsx, MoveList.tsx
 src/lib/game.ts           pure rules wrapper: applyMove, undoPair, toPgn, legalTargets
 src/lib/opponent.ts       Opponent interface + firstLegalMove
-src/lib/registry.ts       model stages (only `mock` in P0)
+src/islands/More.tsx      the drawer: sampling, unmasked, latency, top-5, arrows
+src/workers/decoder.worker.ts  ONNX Runtime session, download and logits
+src/workers/decoder-client.ts  main-thread handle (owns the `new Worker` literal)
+src/lib/model.ts          prompt, legality mask, sampling and timings
+src/lib/worker-protocol.ts typed messages, ORT version and the model cache name
+src/lib/registry.ts       model stages, sizes and Hub URLs
 src/lib/query.ts          ?mock, ?stage, ?color
 src/lib/chess-lm/         UCI, SAN char and BPE tokenizers + synced vocab, BPE and fixtures
 src/styles/tokens.css     design tokens copied from rukh-lab (hash-locked)
 src/styles/board.css      board theme derived from the tokens
-e2e/                      game, layout and a11y specs
+public/ort/<version>/     self-hosted ORT runtime (generated, git-ignored)
+public/test/              169 KB toy decoder served at ?stage=test
+e2e/                      game, layout, a11y and model specs
 nginx/, Dockerfile        static serving with COOP/COEP and security headers
 ```
 
