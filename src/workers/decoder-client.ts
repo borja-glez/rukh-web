@@ -10,6 +10,8 @@ import {
 
 export interface LoadReport {
   backend: Backend;
+  /** Why WebGPU was not used, when it was not. */
+  fallbackReason?: string;
   loadMs: number;
 }
 
@@ -87,11 +89,15 @@ export function createDecoder(): Decoder {
 
   return {
     async init(stage, url, sizeBytes, onProgress) {
-      const ready = await send<{ backend: Backend; loadMs: number }>(
+      const ready = await send<{ backend: Backend; fallbackReason?: string; loadMs: number }>(
         { type: 'init', stage, url, sizeBytes },
         onProgress,
       );
-      return { backend: ready.backend, loadMs: ready.loadMs };
+      return {
+        backend: ready.backend,
+        fallbackReason: ready.fallbackReason,
+        loadMs: ready.loadMs,
+      };
     },
     async logits(ids) {
       const answer = await send<{ data: Float32Array; inferMs: number }>({ type: 'logits', ids });

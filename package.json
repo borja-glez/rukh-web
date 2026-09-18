@@ -14,6 +14,7 @@
     "dev": "astro dev",
     "prebuild": "node scripts/copy-assets.mjs",
     "build": "astro build",
+    "postbuild": "node scripts/copy-assets.mjs --verify",
     "preview": "astro preview",
     "check": "astro check",
     "lint": "eslint .",

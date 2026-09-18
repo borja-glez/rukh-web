@@ -23,7 +23,8 @@ lives in the **"Más" drawer**, closed by default, and never touches this screen
 Astro 7 (static) with Preact islands and `@preact/signals`, [cm-chessboard](https://github.com/shaack/cm-chessboard)
 8 (MIT, SVG) for the board, [chess.js](https://github.com/jhlywa/chess.js) 1.4 (BSD-2) for the
 rules and [onnxruntime-web](https://onnxruntime.ai/) 1.30 (MIT) for the model. TypeScript 6,
-pnpm 10, Node 24. Tests with Vitest, E2E with Playwright (three viewports), axe-core, Lighthouse
+pnpm 10, Node 24. Tests with Vitest, E2E with Playwright (three viewports plus a cross-origin
+isolated one), axe-core, Lighthouse
 CI; served by nginx from a multi-stage Docker image.
 
 The rules always run in the browser: the model only proposes a move and `chess.js` decides whether
@@ -31,18 +32,18 @@ it is legal.
 
 ## Scripts
 
-| Script                              | What it does                                                       |
-| ----------------------------------- | ------------------------------------------------------------------ |
-| `pnpm dev` / `pnpm build`           | Dev server / static build (`prebuild` copies sprites and ORT)      |
-| `pnpm preview`                      | Serves `dist/`                                                     |
-| `pnpm check` / `pnpm lint`          | `astro check` (TypeScript) / ESLint                                |
-| `pnpm format` / `pnpm format:check` | Prettier                                                           |
-| `pnpm test`                         | Vitest unit tests (`tests/`)                                       |
-| `pnpm e2e`                          | Playwright: mobile 390x844, tablet 820x1180, desktop 1280x800      |
-| `pnpm lighthouse`                   | Lighthouse CI, mobile then desktop, >= 0.95 in the four categories |
-| `pnpm sync:tokens [--from <src>]`   | Copies `tokens.css` from `../rukh-lab` (or a URL) and updates lock |
-| `pnpm tokens:hash [--write]`        | Prints (or stores) the sha256 of `src/styles/tokens.css`           |
-| `pnpm sync:tokenizer [--from <u>]`  | Copies the tokenizer artifacts from `../rukh` (or a base URL)      |
+| Script                              | What it does                                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------------------------ |
+| `pnpm dev` / `pnpm build`           | Dev server / static build (`prebuild` copies sprites and ORT, `postbuild` verifies them)   |
+| `pnpm preview`                      | Serves `dist/`                                                                             |
+| `pnpm check` / `pnpm lint`          | `astro check` (TypeScript) / ESLint                                                        |
+| `pnpm format` / `pnpm format:check` | Prettier                                                                                   |
+| `pnpm test`                         | Vitest unit tests (`tests/`)                                                               |
+| `pnpm e2e`                          | Playwright: mobile 390x844, tablet 820x1180, desktop 1280x800, plus `isolated` (COOP/COEP) |
+| `pnpm lighthouse`                   | Lighthouse CI, mobile then desktop, >= 0.95 in the four categories                         |
+| `pnpm sync:tokens [--from <src>]`   | Copies `tokens.css` from `../rukh-lab` (or a URL) and updates lock                         |
+| `pnpm tokens:hash [--write]`        | Prints (or stores) the sha256 of `src/styles/tokens.css`                                   |
+| `pnpm sync:tokenizer [--from <u>]`  | Copies the tokenizer artifacts from `../rukh` (or a base URL)                              |
 
 Run `pnpm exec playwright install chromium` once before `pnpm e2e`.
 
@@ -85,9 +86,18 @@ versioned bucket and "Borrar modelos descargados" empties it.
 to emit it as its own chunk (`tests/worker-chunk.test.ts` fails if it is ever inlined as a `data:`
 URL). It streams the `.onnx` with `fetch` and a `ReadableStream`, reports the progress in MB,
 stores the bytes in the Cache API and then creates the session with
-`executionProviders: ['webgpu']`, falling back to `['wasm']`; the panel shows which one won.
-Sessions are created strictly in series and `run` calls go through a single promise chain, because
-the asyncify build of ORT cannot re-enter an async call.
+`executionProviders: ['webgpu']`. WebGPU is used whenever `navigator.gpu.requestAdapter()` hands
+out an adapter; WASM is the fallback only when there is no adapter or when creating the WebGPU
+session throws, and the reason is sent back with the `ready` message and printed under the badge
+(`En WASM: …`), so a slow game is never a mystery. Sessions are created strictly in series and
+`run` calls go through a single promise chain, because the asyncify build of ORT cannot re-enter
+an async call.
+
+The worker pins `ort.env.wasm.numThreads = 1` and `ort.env.wasm.proxy = false`, isolated or not.
+WASM here is only the fallback (WebGPU is the fast path and the decoder is 40 MB), and more
+threads or the proxy would make ORT reach for artefacts that are not published.
+
+### Publishing the ORT runtime, and the COOP/COEP finding
 
 The ORT runtime is **self-hosted**: `scripts/copy-assets.mjs` (run by `predev` and `prebuild`)
 copies `ort-wasm-simd-threaded.asyncify.{mjs,wasm}` into `public/ort/<version>/`, writes a `.gz`
@@ -95,9 +105,42 @@ sibling for nginx `gzip_static` and stops the build if the installed `onnxruntim
 from `ORT_VERSION` in `src/lib/worker-protocol.ts`. The worker points `ort.env.wasm.wasmPaths`
 there, a small Vite plugin in `astro.config.mjs` rewrites ORT's
 `new URL('...wasm', import.meta.url)` fallback to the same path so the bundler does not ship a
-second 27 MB copy, and `public/ort/` is git-ignored because it is generated. Multi-threaded WASM
-needs the COOP/COEP headers nginx sets; without cross-origin isolation the runtime stays
-single-threaded.
+second 27 MB copy, and `public/ort/` is git-ignored because it is generated. Only the asyncify
+pair is published: `onnxruntime-web/webgpu` runs on that build for WebGPU and for its WASM
+fallback alike, and the other three variants (`...threaded`, `...jsep`, `...jspi`) would add
+60 MB for nothing. `postbuild` runs `scripts/copy-assets.mjs --verify`, which greps the built
+bundle for every `ort-wasm*.{mjs,wasm}` name it can request and fails the build, by name, if one
+of them is not under `dist/ort/<version>/` — and warns about anything published that nobody asks
+for. (`ort-wasm-proxy-worker` also appears in the bundle; it is the _name_ given to the proxy
+worker, not a file, and `proxy = false` means it is never created.)
+
+**The COOP/COEP finding.** nginx sets `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`, so the container is cross-origin isolated while
+`pnpm preview` is not. That difference hid a production-only failure that looked like a WASM
+threading problem and was not one: nginx's bundled `mime.types` (checked in 1.29) has an entry
+for `js` and **none for `mjs`**, so `/ort/<version>/ort-wasm-simd-threaded.asyncify.mjs` went out
+as `application/octet-stream`. With `X-Content-Type-Options: nosniff` the browser refuses to
+evaluate it, the worker's dynamic `import()` of the ORT loader fails and both backends die with
+`no available backend found. ERR: [wasm] Error: previous call to 'initWasm()' failed.` — while the
+network panel shows a perfectly healthy 200. `nginx/default.conf` now declares
+`location ~* \.mjs$ { default_type text/javascript; }` next to the `.wasm` and `.onnx` ones.
+
+Nothing in the suite would have caught it, because `pnpm preview` serves `.mjs` correctly and
+sends no isolation headers. `e2e/fixtures/coi-server.mjs` closes that gap: it serves the built
+`dist/` with the two isolation headers and with nginx's own content types — a baseline copied from
+`mime.types` (still without `mjs`) plus the `default_type` declarations it reads out of
+`nginx/default.conf`. The `isolated` Playwright project runs `e2e/model.spec.ts` against it on
+port 4323. Take the `.mjs` location back out of the nginx config and that project fails.
+
+### Two ways the board can be blocked
+
+The board publishes two independent states, and both have to clear before it takes input again:
+`data-busy` while cm-chessboard animates a move (about 150 ms) and `data-thinking` while the model
+decides, which can be seconds. They used to be one, and that cost a bug: `data-busy` cleared as
+soon as the animation ended, the board looked idle while the model was still thinking, and every
+move played in that window was refused because it was not the human's turn — a four-move opening
+ended up as a single ply in the move list. The panel says `El modelo piensa…` for the same window,
+so the screen and the attribute never disagree, and `waitIdle` in `e2e/helpers.ts` waits for both.
 
 ### From the position to the move
 
@@ -191,6 +234,7 @@ src/styles/board.css      board theme derived from the tokens
 public/ort/<version>/     self-hosted ORT runtime (generated, git-ignored)
 public/test/              169 KB toy decoder served at ?stage=test
 e2e/                      game, layout, a11y and model specs
+e2e/fixtures/coi-server.mjs  dist/ served with the production headers and MIME types
 nginx/, Dockerfile        static serving with COOP/COEP and security headers
 ```
 

@@ -6,6 +6,14 @@ import type { TopEntry } from '../lib/model';
 interface Props {
   game: Signal<GameState>;
   human: Signal<Color>;
+  /**
+   * True while the model is thinking (or the board is turning): the human cannot move. It is
+   * published as `data-thinking` on the board, separately from `data-busy`, because they mean
+   * different things — `data-busy` is a 150 ms piece animation, `data-thinking` can be seconds
+   * of inference. Waiting only for `data-busy` looks idle while the model is still deciding,
+   * which silently swallowed the next click.
+   */
+  thinking: Signal<boolean>;
   /** Set while the board animates an orientation change. */
   turning: Signal<boolean>;
   /** The five moves the network proposed last, drawn as arrows when `arrows` is on. */
@@ -32,7 +40,7 @@ const ARROW_MOVE = /^([a-h][1-8])([a-h][1-8])/;
  * import time), the sprites are served from /pieces and /extensions (copied by
  * scripts/copy-assets.mjs) and the theme lives in src/styles/board.css.
  */
-export default function Board({ game, human, turning, top5, arrows, onMove }: Props) {
+export default function Board({ game, human, thinking, turning, top5, arrows, onMove }: Props) {
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -92,7 +100,7 @@ export default function Board({ game, human, turning, top5, arrows, onMove }: Pr
         const state = game.value;
         switch (event.type) {
           case INPUT_EVENT_TYPE.moveInputStarted: {
-            if (state.over || state.turn !== human.value) return false;
+            if (thinking.value || state.over || state.turn !== human.value) return false;
             const targets = legalTargets(state, event.squareFrom);
             if (targets.length === 0) return false;
             clearTargets();
@@ -100,6 +108,7 @@ export default function Board({ game, human, turning, top5, arrows, onMove }: Pr
             return true;
           }
           case INPUT_EVENT_TYPE.validateMoveInput: {
+            if (thinking.value) return false;
             const from = event.squareFrom;
             const to = event.squareTo ?? '';
             if (needsPromotion(state, from, to)) {
@@ -210,10 +219,15 @@ export default function Board({ game, human, turning, top5, arrows, onMove }: Pr
       disposed = true;
       dispose?.();
     };
-  }, [game, human, turning, top5, arrows, onMove]);
+  }, [game, human, thinking, turning, top5, arrows, onMove]);
 
   return (
-    <div class="board" data-testid="board" data-busy="true">
+    <div
+      class="board"
+      data-testid="board"
+      data-busy="true"
+      data-thinking={thinking.value ? 'true' : 'false'}
+    >
       <div class="board__surface" ref={container} />
     </div>
   );

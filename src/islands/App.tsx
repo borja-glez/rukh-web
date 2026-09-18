@@ -47,6 +47,8 @@ const busy = computed(() => thinking.value || turning.value);
 const status = signal<ModelStatus>('mock');
 const progress = signal<ProgressMessage | null>(null);
 const backend = signal<Backend | null>(null);
+/** Why WebGPU was not used, when it was not; shown under the backend badge. */
+const fallbackReason = signal<string | null>(null);
 const loadMs = signal(0);
 const error = signal<string | null>(null);
 
@@ -189,6 +191,7 @@ async function load() {
       (update) => (progress.value = update),
     );
     backend.value = ready.backend;
+    fallbackReason.value = ready.fallbackReason ?? null;
     loadMs.value = ready.loadMs;
     status.value = 'ready';
     void settle();
@@ -205,6 +208,7 @@ function chooseStage(id: string) {
   waterfall.value = [];
   illegal.value = null;
   backend.value = null;
+  fallbackReason.value = null;
   progress.value = null;
   error.value = null;
   const entry = currentStage();
@@ -256,6 +260,7 @@ export default function App() {
       <Board
         game={game}
         human={human}
+        thinking={busy}
         turning={turning}
         top5={top5}
         arrows={showArrows}
@@ -270,6 +275,7 @@ export default function App() {
           status={status}
           progress={progress}
           backend={backend}
+          fallbackReason={fallbackReason}
           error={error}
           elo={elo}
           onStage={chooseStage}

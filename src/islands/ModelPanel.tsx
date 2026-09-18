@@ -18,6 +18,8 @@ interface Props {
   status: Signal<ModelStatus>;
   progress: Signal<ProgressMessage | null>;
   backend: Signal<Backend | null>;
+  /** Why the session is on WASM instead of WebGPU, when it is. */
+  fallbackReason: Signal<string | null>;
   error: Signal<string | null>;
   elo: Signal<number>;
   onStage: (id: string) => void;
@@ -56,6 +58,7 @@ export default function ModelPanel({
   status,
   progress,
   backend,
+  fallbackReason,
   error,
   elo,
   onStage,
@@ -153,12 +156,19 @@ export default function ModelPanel({
       ) : null}
 
       {phase === 'ready' && backend.value ? (
-        <p class="model__status caption">
-          <span class="badge" data-testid="backend">
-            {BACKEND_LABEL[backend.value]}
-          </span>{' '}
-          {current.label}
-        </p>
+        <>
+          <p class="model__status caption">
+            <span class="badge" data-testid="backend">
+              {BACKEND_LABEL[backend.value]}
+            </span>{' '}
+            {current.label}
+          </p>
+          {fallbackReason.value ? (
+            <p class="model__status caption" data-testid="backend-note">
+              En WASM: {fallbackReason.value}
+            </p>
+          ) : null}
+        </>
       ) : null}
 
       {phase === 'error' ? (
@@ -167,7 +177,7 @@ export default function ModelPanel({
         </p>
       ) : null}
 
-      <p class="model__turn" data-testid="status">
+      <p class="model__turn" data-testid="status" data-thinking={busy.value ? 'true' : 'false'}>
         {statusText(state, color, busy.value)}
       </p>
       <div class="model__row" role="group" aria-label="Color">

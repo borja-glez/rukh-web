@@ -56,6 +56,8 @@ export interface ReadyMessage {
   type: 'ready';
   id: number;
   backend: Backend;
+  /** Why WebGPU was not used, when `backend` is `wasm` and a reason is known. */
+  fallbackReason?: string;
   loadMs: number;
 }
 

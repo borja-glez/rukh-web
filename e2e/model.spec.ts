@@ -34,6 +34,9 @@ async function plies(page: Page): Promise<string[]> {
 
 /** Plays one human move: the first legal one in the position the move list describes. */
 async function playOne(page: Page, touch: boolean): Promise<void> {
+  // The move list is only trustworthy once the model has stopped thinking, so wait first and
+  // read afterwards.
+  await waitIdle(page);
   const chess = new Chess();
   for (const san of await plies(page)) chess.move(san);
   const move = chess.moves({ verbose: true }).find((candidate) => !candidate.promotion);
@@ -110,6 +113,66 @@ test.describe('playing against the ONNX decoder', () => {
     await expect(page.getByTestId('top5').locator('.top5__uci').first()).toHaveText(
       /^[a-h][1-8][a-h][1-8][qrbn]?$/,
     );
+  });
+
+  /**
+   * Regression test for a game that stopped after one ply. The board only published `data-busy`,
+   * which clears as soon as the 150 ms piece animation ends — long before the model has answered.
+   * A player (and this test) then clicks the next move while it is still the model's turn, the
+   * board refuses it, and the clicks are silently lost. Nothing here waits for the move list to
+   * grow: the only signal used between moves is the one a human reads off the screen, so if the
+   * board ever again claims to be idle while the model thinks, the ply count comes up short.
+   */
+  test('keeps every human move when only the idle state is waited on', async ({
+    page,
+    hasTouch,
+  }) => {
+    await openStage(page);
+    await page.getByTestId('play').click();
+    await expect(page.getByTestId('backend')).toBeVisible({ timeout: LOAD_TIMEOUT });
+
+    for (let move = 0; move < 6; move += 1) await playOne(page, hasTouch);
+    await waitIdle(page);
+
+    // Six human moves, six model replies: nothing was dropped on the way.
+    await expect(page.getByTestId('move-list').locator('[data-ply]')).toHaveCount(12);
+    const chess = new Chess();
+    for (const san of await plies(page)) expect(() => chess.move(san)).not.toThrow();
+  });
+
+  test('says "piensa" while the model decides and clears it afterwards', async ({
+    page,
+    hasTouch,
+  }) => {
+    await openStage(page);
+    await page.getByTestId('play').click();
+    await expect(page.getByTestId('backend')).toBeVisible({ timeout: LOAD_TIMEOUT });
+
+    // The toy model answers in milliseconds, so the thinking window cannot be sampled by
+    // polling: record the status line from a MutationObserver instead, which sees every flip.
+    await page.evaluate(() => {
+      const bag = window as unknown as { __thinking?: string[] };
+      bag.__thinking = [];
+      const board = document.querySelector('[data-testid="board"]');
+      const status = document.querySelector('[data-testid="status"]');
+      if (!board || !status) return;
+      new MutationObserver(() => {
+        if (board.getAttribute('data-thinking') === 'true') {
+          bag.__thinking?.push(status.textContent ?? '');
+        }
+      }).observe(board, { attributes: true, attributeFilter: ['data-thinking'] });
+    });
+
+    await playOne(page, hasTouch);
+    await waitIdle(page);
+
+    const seen = await page.evaluate(
+      () => (window as unknown as { __thinking?: string[] }).__thinking ?? [],
+    );
+    expect(seen.length).toBeGreaterThan(0);
+    // Whenever the board said it was thinking, the panel said so too, in Spanish.
+    for (const text of seen) expect(text).toContain('piensa');
+    await expect(page.getByTestId('status')).toHaveText('Te toca mover');
   });
 
   test('draws the top-five arrows when the drawer turns them on', async ({ page, hasTouch }) => {

@@ -19,7 +19,6 @@ import {
 interface WorkerScope {
   postMessage(message: WorkerResponse, transfer?: Transferable[]): void;
   addEventListener(type: 'message', listener: (event: MessageEvent) => void): void;
-  crossOriginIsolated?: boolean;
 }
 
 const ctx = self as unknown as WorkerScope;
@@ -27,13 +26,20 @@ const ctx = self as unknown as WorkerScope;
 // Self-hosted runtime: `public/ort/<version>/` is filled by `scripts/copy-assets.mjs` so the
 // page never reaches a CDN (the CSP would not allow it either).
 ort.env.wasm.wasmPaths = ORT_BASE;
-// Multi-threaded WASM needs cross-origin isolation (COOP/COEP, set by nginx). Without it the
-// runtime must stay single-threaded or it spawns workers that cannot allocate shared memory.
-ort.env.wasm.numThreads = ctx.crossOriginIsolated ? 4 : 1;
+// One thread, always. WASM is only the fallback here (WebGPU is the fast path and this decoder
+// is 40 MB), and asking for more threads under cross-origin isolation makes ORT reach for the
+// threaded/proxy artefacts that `scripts/copy-assets.mjs` deliberately does not publish. Keeping
+// it at one means the runtime needs exactly the two files we do publish, isolated or not.
+ort.env.wasm.numThreads = 1;
+// No proxy worker either: it would be a third artefact (`ort-wasm-proxy-worker`) and this code
+// already runs off the main thread, which is the only thing the proxy buys.
+ort.env.wasm.proxy = false;
 ort.env.logLevel = 'error';
 
 let session: ort.InferenceSession | null = null;
 let backend: Backend | null = null;
+/** Why WebGPU was not used, when it was not; surfaced in the panel under the backend badge. */
+let fallbackReason: string | null = null;
 
 /** The single chain every ORT call is queued on: no two sessions or runs are ever in flight. */
 let chain: Promise<unknown> = Promise.resolve();
@@ -100,31 +106,56 @@ async function fetchModel(id: number, url: string, sizeBytes: number): Promise<U
   return bytes;
 }
 
-/** WebGPU first, WASM when it is missing or the adapter refuses the graph. */
+/** The WebGPU adapter, or the reason there is none. Never throws. */
+async function webgpuAdapter(): Promise<{ adapter: unknown } | { reason: string }> {
+  const gpu = (globalThis as { navigator?: { gpu?: { requestAdapter(): Promise<unknown> } } })
+    .navigator?.gpu;
+  if (!gpu) return { reason: 'este navegador no expone WebGPU' };
+  try {
+    const adapter = await gpu.requestAdapter();
+    if (!adapter) return { reason: 'WebGPU no ha ofrecido ningún adaptador' };
+    return { adapter };
+  } catch (cause) {
+    return { reason: `WebGPU ha fallado al pedir el adaptador: ${describe(cause)}` };
+  }
+}
+
+function describe(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+/**
+ * WebGPU whenever `requestAdapter()` hands out an adapter; WASM only when it does not, or when
+ * creating the session on WebGPU throws. Both fallbacks carry the reason, which the panel shows
+ * under the badge so a slow game on WASM is never a mystery.
+ */
 async function createSession(
   bytes: Uint8Array,
-): Promise<{ session: ort.InferenceSession; backend: Backend }> {
+): Promise<{ session: ort.InferenceSession; backend: Backend; reason: string | null }> {
   const options: ort.InferenceSession.SessionOptions = {
     graphOptimizationLevel: 'all',
     executionMode: 'sequential',
   };
-  const hasGpu = typeof navigator !== 'undefined' && 'gpu' in navigator;
-  if (hasGpu) {
+  const probe = await webgpuAdapter();
+  let reason = 'reason' in probe ? probe.reason : null;
+  if (!reason) {
     try {
       const created = await ort.InferenceSession.create(bytes, {
         ...options,
         executionProviders: ['webgpu'],
       });
-      return { session: created, backend: 'webgpu' };
-    } catch {
-      // Fall through: an adapter that cannot compile the graph is a normal outcome, not a bug.
+      return { session: created, backend: 'webgpu', reason: null };
+    } catch (cause) {
+      // An adapter that cannot compile the graph is a normal outcome, not a bug: say so and
+      // carry on with WASM.
+      reason = `WebGPU no ha podido crear la sesión: ${describe(cause)}`;
     }
   }
   const created = await ort.InferenceSession.create(bytes, {
     ...options,
     executionProviders: ['wasm'],
   });
-  return { session: created, backend: 'wasm' };
+  return { session: created, backend: 'wasm', reason };
 }
 
 async function init(request: Extract<WorkerRequest, { type: 'init' }>): Promise<void> {
@@ -136,11 +167,13 @@ async function init(request: Extract<WorkerRequest, { type: 'init' }>): Promise<
     const created = await createSession(bytes);
     session = created.session;
     backend = created.backend;
+    fallbackReason = created.reason;
   });
   reply({
     type: 'ready',
     id: request.id,
     backend: backend ?? 'wasm',
+    fallbackReason: fallbackReason ?? undefined,
     loadMs: Math.round(performance.now() - started),
   });
 }
@@ -174,6 +207,7 @@ async function dispose(request: Extract<WorkerRequest, { type: 'dispose' }>): Pr
     await session?.release();
     session = null;
     backend = null;
+    fallbackReason = null;
   });
   reply({ type: 'disposed', id: request.id });
 }

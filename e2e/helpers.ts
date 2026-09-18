@@ -90,9 +90,19 @@ export function ply(page: Page, index: number): Locator {
   return page.locator(`[data-ply="${index}"]`);
 }
 
-/** cm-chessboard ignores input while a move animation runs; the board flags it with data-busy. */
+/**
+ * Waits until the board really accepts input again. Two different things can block it and both
+ * have to clear:
+ *
+ *   * `data-busy` — cm-chessboard is animating a move (about 150 ms) and ignores new input;
+ *   * `data-thinking` — the model is deciding its reply, which can take seconds. The board looks
+ *     idle meanwhile, so waiting only for `data-busy` returns far too early and every click made
+ *     in that window is (correctly) refused: it is not the human's turn yet.
+ */
 export async function waitIdle(page: Page): Promise<void> {
-  await expect(page.getByTestId('board')).toHaveAttribute('data-busy', 'false');
+  const board = page.getByTestId('board');
+  await expect(board).toHaveAttribute('data-busy', 'false');
+  await expect(board).toHaveAttribute('data-thinking', 'false');
 }
 
 export async function tapMove(page: Page, move: Uci, touch: boolean): Promise<void> {
