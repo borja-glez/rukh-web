@@ -4,12 +4,17 @@ import { square, tapMove, waitIdle } from './helpers';
 
 /**
  * The real worker path, exercised against the toy decoder committed in `public/test/`: same
- * contract as the Hub exports (`idx (B, T)` int64 -> `logits (B, V)`), 169 KB instead of 40 MB.
- * `?stage=test` is the only way to reach it. Headless Chromium has no WebGPU adapter, so the
- * session falls back to WASM; the WebGPU assertions skip themselves when no adapter answers.
+ * contract as the Hub exports (`idx (B, T)` int64 -> `logits (B, 2030)`, `block` 200) and written
+ * by the same exporter (`rukh.export.export_onnx`), 154 KB instead of 40 MB. `?stage=test` is the
+ * only way to reach it. Headless Chromium has no WebGPU adapter, so the session falls back to
+ * WASM; the WebGPU assertions skip themselves when no adapter answers.
  */
 const STAGE = '/?stage=test';
 const LOAD_TIMEOUT = 120_000;
+
+/** What the worker must find in the file before it lets the model play. */
+const VOCAB = 2030;
+const BLOCK = 200;
 
 /** URLs of everything the model path could pull: the weights and the ORT runtime. */
 function modelRequests(page: Page): string[] {
@@ -68,6 +73,29 @@ test.describe('playing against the ONNX decoder', () => {
     await page.getByTestId('play').click();
     await expect(page.getByTestId('backend')).toBeVisible({ timeout: LOAD_TIMEOUT });
     expect(requested.filter((url) => url.endsWith('toy-decoder.onnx'))).toHaveLength(1);
+  });
+
+  test('checks the model contract against the tokenizer before playing', async ({
+    page,
+    hasTouch,
+  }) => {
+    await openStage(page);
+    await page.getByTestId('play').click();
+    await expect(page.getByTestId('backend')).toBeVisible({ timeout: LOAD_TIMEOUT });
+
+    // A `ready` at all means the declared output width passed; the drawer says what it was.
+    await openDrawer(page);
+    const contract = page.getByTestId('contract');
+    await expect(contract).toContainText(String(VOCAB));
+    await expect(contract).toContainText(String(BLOCK));
+    await expect(page.getByTestId('model-error')).toHaveCount(0);
+
+    // And the first real answer passed the width check too, or this move would have failed.
+    await playOne(page, hasTouch);
+    await expect(page.getByTestId('move-list').locator('[data-ply]')).toHaveCount(2, {
+      timeout: LOAD_TIMEOUT,
+    });
+    await expect(page.getByTestId('model-error')).toHaveCount(0);
   });
 
   test('the Elo selector waits for the conditioned checkpoints', async ({ page }) => {

@@ -4,7 +4,9 @@
 import {
   asResponse,
   type Backend,
+  type InitRequest,
   type ProgressMessage,
+  type ReadyMessage,
   type WorkerRequest,
 } from '../lib/worker-protocol';
 
@@ -13,7 +15,14 @@ export interface LoadReport {
   /** Why WebGPU was not used, when it was not. */
   fallbackReason?: string;
   loadMs: number;
+  /** Context window the session was accepted under; `buildPrompt` crops the prompt to it. */
+  block: number;
+  /** Width of the logits the model answers with, already checked against the tokenizer. */
+  vocab: number;
 }
+
+/** What `init` needs to know about a stage; the worker's `id` is added by `send`. */
+export type LoadRequest = Omit<InitRequest, 'type' | 'id'>;
 
 export interface LogitsReport {
   data: Float32Array;
@@ -21,13 +30,8 @@ export interface LogitsReport {
 }
 
 export interface Decoder {
-  /** Downloads (or reads from the cache) the model and creates the session. */
-  init(
-    stage: string,
-    url: string,
-    sizeBytes: number,
-    onProgress?: (progress: ProgressMessage) => void,
-  ): Promise<LoadReport>;
+  /** Downloads (or reads from the cache) the model, creates the session and checks its contract. */
+  init(request: LoadRequest, onProgress?: (progress: ProgressMessage) => void): Promise<LoadReport>;
   /** Logits of the last step for a prompt already cropped to the context window. */
   logits(ids: number[]): Promise<LogitsReport>;
   /** Releases the session and terminates the worker; the handle is unusable afterwards. */
@@ -88,15 +92,14 @@ export function createDecoder(): Decoder {
   }
 
   return {
-    async init(stage, url, sizeBytes, onProgress) {
-      const ready = await send<{ backend: Backend; fallbackReason?: string; loadMs: number }>(
-        { type: 'init', stage, url, sizeBytes },
-        onProgress,
-      );
+    async init(request, onProgress) {
+      const ready = await send<ReadyMessage>({ type: 'init', ...request }, onProgress);
       return {
         backend: ready.backend,
         fallbackReason: ready.fallbackReason,
         loadMs: ready.loadMs,
+        block: ready.block,
+        vocab: ready.vocab,
       };
     },
     async logits(ids) {

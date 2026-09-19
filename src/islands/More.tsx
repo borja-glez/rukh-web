@@ -1,4 +1,5 @@
 import type { Signal } from '@preact/signals';
+import type { ModelContract } from '../lib/contract';
 import type { Timings, TopEntry } from '../lib/model';
 import type { Backend } from '../lib/worker-protocol';
 
@@ -11,6 +12,8 @@ interface Props {
   top5: Signal<TopEntry[]>;
   loadMs: Signal<number>;
   backend: Signal<Backend | null>;
+  /** What the loaded file was checked against; null until a session exists. */
+  contract: Signal<ModelContract | null>;
 }
 
 function ms(value: number): string {
@@ -35,6 +38,7 @@ export default function More({
   top5,
   loadMs,
   backend,
+  contract,
 }: Props) {
   const rows = waterfall.value;
   const slowest = rows.reduce((max, row) => Math.max(max, total(row)), 1);
@@ -115,7 +119,8 @@ export default function More({
               {rows.map((row, index) => (
                 <li class="waterfall__row" key={index} data-testid="waterfall-row">
                   <span class="waterfall__num caption">{rows.length - index}</span>
-                  <progress class="bar" value={total(row)} max={slowest} />
+                  {/* Decorative: the three times are spelled out in the span next to it. */}
+                  <progress class="bar" aria-hidden="true" value={total(row)} max={slowest} />
                   <span class="waterfall__times caption">
                     <span data-testid="tokenize-ms">{ms(row.tokenizeMs)}</span>
                     {' → '}
@@ -132,6 +137,12 @@ export default function More({
               Sesión {backend.value === 'webgpu' ? 'WebGPU' : 'WASM'} lista en {loadMs.value} ms.
             </p>
           ) : null}
+          {contract.value ? (
+            <p class="caption" data-testid="contract">
+              Contrato comprobado: vocabulario {contract.value.vocab}, contexto{' '}
+              {contract.value.block} tokens.
+            </p>
+          ) : null}
         </section>
 
         <section class="drawer__block" aria-labelledby="network-title">
@@ -145,7 +156,8 @@ export default function More({
               {top5.value.map((entry) => (
                 <li class="top5__row" key={entry.uci} data-testid="top5-row">
                   <span class="top5__uci mono">{entry.uci}</span>
-                  <progress class="bar" value={entry.prob} max={1} />
+                  {/* Decorative: the percentage is spelled out in the span next to it. */}
+                  <progress class="bar" aria-hidden="true" value={entry.prob} max={1} />
                   <span class="top5__prob caption">{(entry.prob * 100).toFixed(1)} %</span>
                 </li>
               ))}

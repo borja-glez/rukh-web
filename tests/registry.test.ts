@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_BLOCK,
   defaultStageId,
   findStage,
   modelUrl,
   selectableStages,
+  stageBlock,
   STAGES,
   STAGE_SIZE_MB,
   TEST_STAGE,
@@ -26,6 +28,16 @@ describe('stage registry', () => {
       expect(stage.sizeMb).toBe(STAGE_SIZE_MB[stage.id as keyof typeof STAGE_SIZE_MB]);
     }
     expect(STAGE_SIZE_MB['small-fp16']).toBeGreaterThan(STAGE_SIZE_MB['small-int8']);
+  });
+
+  it('declares the context of every ONNX stage', () => {
+    // ORT Web cannot read the `rukh_block` metadata of the file, so this is the only place the
+    // browser learns the context; `buildPrompt` crops to it instead of to a constant.
+    for (const stage of [...STAGES.slice(1), TEST_STAGE]) {
+      expect(stageBlock(stage)).toBe(DEFAULT_BLOCK);
+    }
+    expect(stageBlock({ ...TEST_STAGE, block: undefined })).toBe(DEFAULT_BLOCK);
+    expect(stageBlock({ ...TEST_STAGE, block: 512 })).toBe(512);
   });
 
   it('builds the Hub URL of a stage', () => {

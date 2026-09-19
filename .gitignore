@@ -16,3 +16,7 @@ blob-report/
 *.log
 .DS_Store
 Thumbs.db
+
+# Stray sidecar the dynamo ONNX exporter leaves behind; `set_metadata` re-saves the weights
+# inline, so the `.onnx` is self-contained and the `.data` is dead weight.
+public/test/*.onnx.data

@@ -11,7 +11,12 @@ import { Chess } from 'chess.js';
 import { UciTokenizer, eloBin, BOS_ID } from './chess-lm';
 import type { GameState, Move, Promotion } from './game';
 
-/** Context window of the decoder (`DecoderConfig.block`). */
+/**
+ * Fallback context window, used only until a session reports its own. The real one travels in the
+ * worker's `ready` message (`ReadyMessage.block`, from the registry entry of the stage) and is
+ * passed in as `MoveRequest.context`: a model with another `block` would otherwise be fed a prompt
+ * it cannot read, or be cropped for nothing.
+ */
 export const CONTEXT = 200;
 
 /** `<bos>`, the white Elo bin and the black Elo bin. */
@@ -68,6 +73,8 @@ export interface MoveRequest {
   blackElo: number;
   options?: Partial<SampleOptions>;
   tokenizer?: UciTokenizer;
+  /** The model's context window; defaults to `CONTEXT` when no session has reported one. */
+  context?: number;
 }
 
 const SHARED_TOKENIZER = new UciTokenizer();
@@ -223,7 +230,13 @@ export async function proposeMove(source: LogitsSource, request: MoveRequest): P
   const random = options.random ?? Math.random;
 
   const tokenizeStart = performance.now();
-  const ids = buildPrompt(historyUci(request.state), request.whiteElo, request.blackElo, tokenizer);
+  const ids = buildPrompt(
+    historyUci(request.state),
+    request.whiteElo,
+    request.blackElo,
+    tokenizer,
+    request.context ?? CONTEXT,
+  );
   const legal = legalTokenIds(request.state.fen, tokenizer);
   const tokenizeMs = performance.now() - tokenizeStart;
 

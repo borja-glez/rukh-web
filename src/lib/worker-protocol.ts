@@ -29,6 +29,10 @@ export interface InitRequest {
   url: string;
   /** Expected size in bytes; used for the progress bar when there is no `content-length`. */
   sizeBytes: number;
+  /** Context window the stage was trained with (`DecoderConfig.block`), from the registry. */
+  block: number;
+  /** Vocabulary size the caller's tokenizer has; the model's output width must match it. */
+  vocab: number;
 }
 
 export interface LogitsRequest {
@@ -59,6 +63,9 @@ export interface ReadyMessage {
   /** Why WebGPU was not used, when `backend` is `wasm` and a reason is known. */
   fallbackReason?: string;
   loadMs: number;
+  /** The contract the session was checked against; `buildPrompt` crops to `block`. */
+  block: number;
+  vocab: number;
 }
 
 export interface LogitsMessage {

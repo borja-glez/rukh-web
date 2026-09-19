@@ -11,6 +11,7 @@ import {
   type Move,
 } from '../lib/game';
 import {
+  CONTEXT,
   DEFAULT_SAMPLE,
   proposeMove,
   type Proposal,
@@ -19,8 +20,10 @@ import {
 } from '../lib/model';
 import { firstLegalMove, type Opponent } from '../lib/opponent';
 import { parseQuery } from '../lib/query';
-import { findStage, modelUrl, STAGES, type Stage } from '../lib/registry';
+import type { ModelContract } from '../lib/contract';
+import { findStage, modelUrl, stageBlock, STAGES, type Stage } from '../lib/registry';
 import { MODEL_CACHE, type Backend, type ProgressMessage } from '../lib/worker-protocol';
+import { UciTokenizer } from '../lib/chess-lm';
 import { createDecoder, type Decoder } from '../workers/decoder-client';
 import Board from './Board';
 import ModelPanel from './ModelPanel';
@@ -33,6 +36,12 @@ const WATERFALL_LENGTH = 10;
 
 /** Model lifecycle: nothing is downloaded before the user consents in the `consent` step. */
 export type ModelStatus = 'mock' | 'consent' | 'loading' | 'ready' | 'error';
+
+/** Outcome of "Borrar modelos descargados": what `caches.delete` answered, or why it could not. */
+export interface ClearCacheResult {
+  deleted: boolean;
+  error?: string;
+}
 
 /** Game state lives in module-level signals so the three zones share one source of truth. */
 const game = signal<GameState>(newGame());
@@ -51,6 +60,13 @@ const backend = signal<Backend | null>(null);
 const fallbackReason = signal<string | null>(null);
 const loadMs = signal(0);
 const error = signal<string | null>(null);
+/** What the loaded file was checked against, or null while nothing is loaded. */
+const contract = signal<ModelContract | null>(null);
+/** Context window the loaded session reported; `CONTEXT` until one has. */
+const context = signal(CONTEXT);
+
+/** The tokenizer the prompt is built with; its size is the contract the worker checks. */
+const tokenizer = new UciTokenizer();
 
 /** Sampling controls; they live in the drawer, not on the main screen. */
 const temperature = signal(DEFAULT_SAMPLE.temperature);
@@ -97,6 +113,8 @@ async function pickMove(state: GameState): Promise<Move | null> {
     whiteElo: elo.value,
     blackElo: elo.value,
     options,
+    tokenizer,
+    context: context.value,
   });
   record(proposal);
   if (proposal.move) {
@@ -113,6 +131,8 @@ async function pickMove(state: GameState): Promise<Move | null> {
     whiteElo: elo.value,
     blackElo: elo.value,
     options: { ...options, maskIllegal: true },
+    tokenizer,
+    context: context.value,
   });
   record(rescue);
   return rescue.move;
@@ -185,14 +205,20 @@ async function load() {
   try {
     decoder ??= createDecoder();
     const ready = await decoder.init(
-      entry.id,
-      modelUrl(entry),
-      Math.round(entry.sizeMb * 1_000_000),
+      {
+        stage: entry.id,
+        url: modelUrl(entry),
+        sizeBytes: Math.round(entry.sizeMb * 1_000_000),
+        block: stageBlock(entry),
+        vocab: tokenizer.size,
+      },
       (update) => (progress.value = update),
     );
     backend.value = ready.backend;
     fallbackReason.value = ready.fallbackReason ?? null;
     loadMs.value = ready.loadMs;
+    context.value = ready.block;
+    contract.value = { block: ready.block, vocab: ready.vocab };
     status.value = 'ready';
     void settle();
   } catch (cause) {
@@ -211,6 +237,8 @@ function chooseStage(id: string) {
   fallbackReason.value = null;
   progress.value = null;
   error.value = null;
+  context.value = CONTEXT;
+  contract.value = null;
   const entry = currentStage();
   if (entry.kind === 'mock') {
     status.value = 'mock';
@@ -225,12 +253,16 @@ function chooseStage(id: string) {
   startNewGame();
 }
 
-/** Empties the Cache API bucket so the next "Jugar" downloads the weights again. */
-async function clearCache(): Promise<boolean> {
+/**
+ * Empties the Cache API bucket so the next "Jugar" downloads the weights again. The panel reports
+ * what actually happened, so `deleted: false` (there was nothing stored) and a refusal (private
+ * mode, blocked storage) are told apart instead of both looking like success.
+ */
+async function clearCache(): Promise<ClearCacheResult> {
   try {
-    return await caches.delete(MODEL_CACHE);
-  } catch {
-    return false;
+    return { deleted: await caches.delete(MODEL_CACHE) };
+  } catch (cause) {
+    return { deleted: false, error: cause instanceof Error ? cause.message : String(cause) };
   }
 }
 
@@ -302,6 +334,7 @@ export default function App() {
         top5={top5}
         loadMs={loadMs}
         backend={backend}
+        contract={contract}
       />
     </>
   );

@@ -1,5 +1,5 @@
 import type { Signal } from '@preact/signals';
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import type { Color, GameState } from '../lib/game';
 import { findStage, MODEL_LICENSE, selectableStages, STAGES } from '../lib/registry';
 import {
@@ -8,7 +8,7 @@ import {
   type Backend,
   type ProgressMessage,
 } from '../lib/worker-protocol';
-import type { ModelStatus } from './App';
+import type { ClearCacheResult, ModelStatus } from './App';
 
 interface Props {
   game: Signal<GameState>;
@@ -25,8 +25,21 @@ interface Props {
   onStage: (id: string) => void;
   onColor: (color: Color) => void;
   onPlay: () => void;
-  onClearCache: () => Promise<boolean>;
+  onClearCache: () => Promise<ClearCacheResult>;
 }
+
+/** What the "Borrar modelos descargados" button says, once it has been pressed. */
+type CacheState = 'idle' | 'deleted' | 'empty' | 'failed';
+
+const CACHE_LABEL: Record<CacheState, string> = {
+  idle: 'Borrar modelos descargados',
+  deleted: 'Modelos borrados',
+  empty: 'No había nada guardado',
+  failed: 'No se han podido borrar',
+};
+
+/** How long the button keeps its answer before offering itself again. */
+const CACHE_RESET_MS = 4000;
 
 /** Elo targets offered once the conditioned checkpoints land (M4). */
 const ELO_TARGETS = Array.from({ length: 13 }, (_, i) => 1200 + i * 100);
@@ -72,7 +85,15 @@ export default function ModelPanel({
   const current = findStage(stage.value) ?? STAGES[0];
   const phase = status.value;
   const download = progress.value;
-  const [cleared, setCleared] = useState(false);
+  const [cache, setCache] = useState<CacheState>('idle');
+
+  // The answer is temporary: without this the button would keep claiming "Modelos borrados"
+  // forever, which is a lie as soon as the next model is downloaded.
+  useEffect(() => {
+    if (cache === 'idle') return undefined;
+    const timer = setTimeout(() => setCache('idle'), CACHE_RESET_MS);
+    return () => clearTimeout(timer);
+  }, [cache]);
 
   return (
     <section class="model" aria-labelledby="model-title">
@@ -142,8 +163,10 @@ export default function ModelPanel({
 
       {phase === 'loading' ? (
         <div class="model__loading" data-testid="loading">
+          {/* The caption below says the same thing in words, so the bar is decorative. */}
           <progress
             class="bar"
+            aria-hidden="true"
             value={download?.loaded ?? 0}
             max={Math.max(download?.total ?? 1, 1)}
           />
@@ -204,9 +227,14 @@ export default function ModelPanel({
         type="button"
         class="btn"
         data-testid="clear-cache"
-        onClick={() => void onClearCache().then(() => setCleared(true))}
+        data-cache={cache}
+        onClick={() =>
+          void onClearCache().then((result) =>
+            setCache(result.error ? 'failed' : result.deleted ? 'deleted' : 'empty'),
+          )
+        }
       >
-        {cleared ? 'Modelos borrados' : 'Borrar modelos descargados'}
+        {CACHE_LABEL[cache]}
       </button>
     </section>
   );

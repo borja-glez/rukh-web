@@ -27,7 +27,14 @@ describe('worker protocol', () => {
   });
 
   it('narrows known responses', () => {
-    const ready: WorkerResponse = { type: 'ready', id: 3, backend: 'webgpu', loadMs: 12 };
+    const ready: WorkerResponse = {
+      type: 'ready',
+      id: 3,
+      backend: 'webgpu',
+      loadMs: 12,
+      block: 200,
+      vocab: 2030,
+    };
     expect(asResponse(ready)).toBe(ready);
     expect(asResponse({ type: 'progress', id: 1, loaded: 2, total: 4 })).not.toBeNull();
     expect(asResponse({ type: 'error', id: 1, message: 'boom' })).not.toBeNull();

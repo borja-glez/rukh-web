@@ -14,6 +14,20 @@ export interface Stage {
   url?: string;
   /** True once the stage is trained with the Elo conditioning tokens (M4). */
   eloConditioned?: boolean;
+  /**
+   * Context window the stage was trained with (`DecoderConfig.block`). It lives here because ORT
+   * Web does not expose the `rukh_block` metadata the exporter writes into the file, so the only
+   * place the browser can learn it is the registry; `DEFAULT_BLOCK` when a stage omits it.
+   */
+  block?: number;
+}
+
+/** `DecoderConfig.block` of every model published so far. */
+export const DEFAULT_BLOCK = 200;
+
+/** The context window a stage plays with. */
+export function stageBlock(stage: Stage): number {
+  return stage.block ?? DEFAULT_BLOCK;
 }
 
 /**
@@ -41,6 +55,7 @@ export const STAGES: Stage[] = [
     repo: 'chorcat/rukh-tiny',
     file: 'onnx/model-int8.onnx',
     sizeMb: STAGE_SIZE_MB['tiny-int8'],
+    block: DEFAULT_BLOCK,
   },
   {
     id: 'small-fp16',
@@ -49,6 +64,7 @@ export const STAGES: Stage[] = [
     repo: 'chorcat/rukh-small',
     file: 'onnx/model-fp16.onnx',
     sizeMb: STAGE_SIZE_MB['small-fp16'],
+    block: DEFAULT_BLOCK,
   },
   {
     id: 'small-int8',
@@ -57,14 +73,17 @@ export const STAGES: Stage[] = [
     repo: 'chorcat/rukh-small',
     file: 'onnx/model-int8.onnx',
     sizeMb: STAGE_SIZE_MB['small-int8'],
+    block: DEFAULT_BLOCK,
   },
 ];
 
 /**
- * Toy decoder committed under `public/test/`: two layers and `d_model=32`-class weights with the
- * real contract (`idx (B, T)` int64 -> `logits (B, V)`). It is not in `STAGES` (nothing offers it
- * in the selector); only `?stage=test` reaches it, which is how the E2E suite exercises the real
- * worker path without downloading 40 MB from the Hub.
+ * Toy decoder committed under `public/test/`: one layer, `d_model=8`, and the real contract
+ * (`idx (B, T)` int64 -> `logits (B, 2030)` with `block` 200), exported by the very function that
+ * writes the published models (`rukh.export.export_onnx`, dynamo exporter, `rukh_*` metadata). It
+ * is not in `STAGES` (nothing offers it in the selector); only `?stage=test` reaches it, which is
+ * how the E2E suite exercises the real worker path — contract check included — without
+ * downloading 40 MB from the Hub.
  */
 export const TEST_STAGE: Stage = {
   id: 'test',
@@ -72,6 +91,7 @@ export const TEST_STAGE: Stage = {
   kind: 'onnx',
   sizeMb: 0.2,
   url: '/test/toy-decoder.onnx',
+  block: DEFAULT_BLOCK,
 };
 
 export function findStage(id: string): Stage | undefined {

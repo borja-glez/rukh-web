@@ -5,8 +5,15 @@
 //
 // Two serialisation rules come from ORT itself and are not negotiable: sessions are created one
 // at a time and `run` calls never overlap (the JSEP/asyncify build cannot re-enter an async
-// call). Both go through `serial`, a single promise chain.
+// call). Both go through `serial`, a single promise chain — the download included, so two `init`
+// messages in flight cannot end up fetching twice and racing to install their session.
+//
+// The file is never trusted: `readContract` checks the declared output width against the
+// tokenizer's vocabulary as soon as the session exists, and `assertVocab` checks the real width
+// of every answer. See `src/lib/contract.ts` for why.
 import * as ort from 'onnxruntime-web/webgpu';
+import { RUN_SOURCE, assertVocab, readContract, type ModelContract } from '../lib/contract';
+import { downloadModel } from '../lib/download';
 import {
   MODEL_CACHE,
   ORT_BASE,
@@ -37,9 +44,8 @@ ort.env.wasm.proxy = false;
 ort.env.logLevel = 'error';
 
 let session: ort.InferenceSession | null = null;
-let backend: Backend | null = null;
-/** Why WebGPU was not used, when it was not; surfaced in the panel under the backend badge. */
-let fallbackReason: string | null = null;
+/** Block and vocabulary the live session was accepted under; null while there is no session. */
+let contract: ModelContract | null = null;
 
 /** The single chain every ORT call is queued on: no two sessions or runs are ever in flight. */
 let chain: Promise<unknown> = Promise.resolve();
@@ -57,53 +63,14 @@ function reply(message: WorkerResponse, transfer?: Transferable[]): void {
   ctx.postMessage(message, transfer);
 }
 
-/**
- * The model bytes, from the Cache API when they are already there and from the network
- * otherwise, reporting progress as the body streams in. `total` falls back to the registry size
- * when the response has no usable `content-length` (a Hub redirect to a CDN sometimes omits it).
- */
-async function fetchModel(id: number, url: string, sizeBytes: number): Promise<Uint8Array> {
-  const cache = await caches.open(MODEL_CACHE).catch(() => null);
-  const cached = await cache?.match(url).catch(() => undefined);
-  const response = cached ?? (await fetch(url, { mode: 'cors', credentials: 'omit' }));
-  if (!response.ok) {
-    throw new Error(`no se pudo descargar el modelo (${response.status})`);
-  }
-
-  const declared = Number(response.headers.get('content-length') ?? '0');
-  const total = declared > 0 ? declared : sizeBytes;
-
-  // Keep a pristine clone for the cache: the body can only be read once.
-  if (!cached && cache) {
-    await cache.put(url, response.clone()).catch(() => undefined);
-  }
-
-  const body = response.body;
-  if (!body) {
-    const buffer = new Uint8Array(await response.arrayBuffer());
-    reply({ type: 'progress', id, loaded: buffer.byteLength, total: buffer.byteLength });
-    return buffer;
-  }
-
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let loaded = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    loaded += value.byteLength;
-    reply({ type: 'progress', id, loaded, total: Math.max(total, loaded) });
-  }
-
-  const bytes = new Uint8Array(loaded);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  reply({ type: 'progress', id, loaded, total: loaded });
-  return bytes;
+/** `downloadModel` wired to this worker's globals, reporting progress back to the main thread. */
+function fetchModel(id: number, url: string, sizeBytes: number): Promise<Uint8Array> {
+  return downloadModel(url, sizeBytes, {
+    fetch: globalThis.fetch.bind(globalThis),
+    caches: typeof caches === 'undefined' ? undefined : caches,
+    cacheName: MODEL_CACHE,
+    onProgress: (loaded, total) => reply({ type: 'progress', id, loaded, total }),
+  });
 }
 
 /** The WebGPU adapter, or the reason there is none. Never throws. */
@@ -158,30 +125,46 @@ async function createSession(
   return { session: created, backend: 'wasm', reason };
 }
 
+/**
+ * Downloads the weights and hands them to ORT. The buffer is a local of this frame on purpose:
+ * when it returns, the only copy of the model still alive is the one inside the session, instead
+ * of 80 MB sitting next to it for as long as the worker lives.
+ */
+async function loadSession(request: Extract<WorkerRequest, { type: 'init' }>) {
+  const bytes = await fetchModel(request.id, request.url, request.sizeBytes);
+  return createSession(bytes);
+}
+
 async function init(request: Extract<WorkerRequest, { type: 'init' }>): Promise<void> {
   const started = performance.now();
-  const bytes = await fetchModel(request.id, request.url, request.sizeBytes);
-  await serial(async () => {
-    session?.release();
+  // The download runs inside the chain too: outside it, a second `init` would start its own fetch
+  // while the first was still tearing the old session down, and both would race to install one.
+  const ready = await serial(async () => {
+    await session?.release();
     session = null;
-    const created = await createSession(bytes);
+    contract = null;
+    const created = await loadSession(request);
+    const checked = readContract(created.session, request.vocab, request.block);
     session = created.session;
-    backend = created.backend;
-    fallbackReason = created.reason;
+    contract = checked;
+    return { backend: created.backend, reason: created.reason, contract: checked };
   });
   reply({
     type: 'ready',
     id: request.id,
-    backend: backend ?? 'wasm',
-    fallbackReason: fallbackReason ?? undefined,
+    backend: ready.backend,
+    fallbackReason: ready.reason ?? undefined,
     loadMs: Math.round(performance.now() - started),
+    block: ready.contract.block,
+    vocab: ready.contract.vocab,
   });
 }
 
 async function logits(request: Extract<WorkerRequest, { type: 'logits' }>): Promise<void> {
   const data = await serial(async () => {
     const current = session;
-    if (!current) throw new Error('el modelo todavía no está cargado');
+    const live = contract;
+    if (!current || !live) throw new Error('el modelo todavía no está cargado');
     const ids = BigInt64Array.from(request.ids, (id) => BigInt(id));
     const feeds: Record<string, ort.Tensor> = {
       [current.inputNames[0]]: new ort.Tensor('int64', ids, [1, request.ids.length]),
@@ -194,6 +177,9 @@ async function logits(request: Extract<WorkerRequest, { type: 'logits' }>): Prom
     if (!(raw instanceof Float32Array)) {
       throw new Error(`la salida del modelo no es float32 (${tensor.type})`);
     }
+    // The declared shape is often symbolic, so the real width is only knowable here. A model
+    // whose logits are not the tokenizer's vocabulary would map every id to a different move.
+    assertVocab(raw.length, live.vocab, RUN_SOURCE);
     // Copy out of the ORT arena: the tensor's buffer may be reused by the next run.
     return { values: raw.slice(), inferMs };
   });
@@ -206,8 +192,7 @@ async function dispose(request: Extract<WorkerRequest, { type: 'dispose' }>): Pr
   await serial(async () => {
     await session?.release();
     session = null;
-    backend = null;
-    fallbackReason = null;
+    contract = null;
   });
   reply({ type: 'disposed', id: request.id });
 }
