@@ -1,14 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { UciTokenizer } from '../src/lib/chess-lm';
 import {
+  assertInRange,
+  assertScalarOutput,
   assertVocab,
   declaredVocab,
   readContract,
+  readEncoderContract,
+  BLUNDER_OUTPUT,
+  BLUNDER_RANGE,
   DECLARED_SOURCE,
+  ENCODER_OUTPUTS,
   RUN_SOURCE,
+  VALUE_OUTPUT,
+  VALUE_RANGE,
   type SessionLike,
 } from '../src/lib/contract';
-import { DEFAULT_BLOCK, stageBlock, TEST_STAGE } from '../src/lib/registry';
+import { DEFAULT_BLOCK, ENCODER_BLOCK, stageBlock, TEST_STAGE } from '../src/lib/registry';
 
 /** A session that reports one output with the given shape (undefined = no metadata at all). */
 function session(shape?: readonly (number | string)[]): SessionLike {
@@ -82,5 +90,88 @@ describe('the model contract', () => {
   it('carries the block of the stage that was loaded', () => {
     expect(readContract(session(), VOCAB, stageBlock(TEST_STAGE)).block).toBe(DEFAULT_BLOCK);
     expect(readContract(session(), VOCAB, 64).block).toBe(64);
+  });
+});
+
+/** A session that reports the encoder's two outputs, with the shapes ORT would declare. */
+function encoderSession(
+  names: readonly string[] = ENCODER_OUTPUTS,
+  shapes?: Record<string, readonly (number | string)[]>,
+): SessionLike {
+  return {
+    outputNames: names,
+    outputMetadata: shapes
+      ? names.map((name) => ({ name, isTensor: true, shape: shapes[name] }))
+      : undefined,
+  };
+}
+
+describe("the encoder's contract", () => {
+  it('accepts the graph the exporter writes: value and blunder, one number each', () => {
+    expect(readEncoderContract(encoderSession(), ENCODER_BLOCK)).toEqual({
+      block: ENCODER_BLOCK,
+      outputs: [VALUE_OUTPUT, BLUNDER_OUTPUT],
+    });
+    // `[batch]` is what ORT declares for the squeezed heads: symbolic, so nothing to check yet.
+    expect(
+      readEncoderContract(
+        encoderSession(ENCODER_OUTPUTS, { value: ['batch'], blunder: ['batch'] }),
+        ENCODER_BLOCK,
+      ).outputs,
+    ).toEqual([VALUE_OUTPUT, BLUNDER_OUTPUT]);
+    // And `(B, 1)` is accepted just as well: one number per position either way.
+    expect(
+      readEncoderContract(
+        encoderSession(ENCODER_OUTPUTS, { value: ['batch', 1], blunder: ['batch', 1] }),
+        ENCODER_BLOCK,
+      ).block,
+    ).toBe(ENCODER_BLOCK);
+  });
+
+  it('refuses a file that is not the encoder of the bar', () => {
+    // The decoder's own graph: one output, called something else.
+    expect(() => readEncoderContract(session(['batch', 2030]), ENCODER_BLOCK)).toThrow(/logits/);
+    expect(() => readEncoderContract(encoderSession(['value']), ENCODER_BLOCK)).toThrow(/value/);
+    expect(() =>
+      readEncoderContract(encoderSession(['value', 'blunder', 'result']), ENCODER_BLOCK),
+    ).toThrow(/result/);
+    try {
+      readEncoderContract(encoderSession(['valor', 'error']), ENCODER_BLOCK);
+      expect.unreachable('a graph with other outputs must not be accepted');
+    } catch (error) {
+      // The message is read in the panel by a player, so it is in Spanish and names both sides.
+      const message = (error as Error).message;
+      expect(message).toContain('value y blunder');
+      expect(message).toContain('valor, error');
+    }
+  });
+
+  it('refuses a head that answers more than one number per position', () => {
+    expect(() =>
+      readEncoderContract(
+        encoderSession(ENCODER_OUTPUTS, { value: ['batch', 1], blunder: ['batch', 3] }),
+        ENCODER_BLOCK,
+      ),
+    ).toThrow(new RegExp(DECLARED_SOURCE));
+    // The declared shape is usually symbolic, so the real width is checked on every answer.
+    expect(() => assertScalarOutput(1, 'value', RUN_SOURCE)).not.toThrow();
+    expect(() => assertScalarOutput(2, 'value', RUN_SOURCE)).toThrow(/value/);
+  });
+
+  it('refuses a length the squares scheme could not have produced', () => {
+    expect(() => readEncoderContract(encoderSession(), 0)).toThrow(/encoder/);
+    expect(() => readEncoderContract(encoderSession(), 1.5)).toThrow(/contexto/);
+  });
+
+  it('checks that each head answered inside the range its activation can produce', () => {
+    expect(() => assertInRange(-1, VALUE_OUTPUT, VALUE_RANGE)).not.toThrow();
+    expect(() => assertInRange(0.42, VALUE_OUTPUT, VALUE_RANGE)).not.toThrow();
+    expect(() => assertInRange(1.5, VALUE_OUTPUT, VALUE_RANGE)).toThrow(/value/);
+    expect(() => assertInRange(Number.NaN, VALUE_OUTPUT, VALUE_RANGE)).toThrow(/value/);
+    // `blunder` is already a probability: the sigmoid is inside the graph.
+    expect(() => assertInRange(0, BLUNDER_OUTPUT, BLUNDER_RANGE)).not.toThrow();
+    expect(() => assertInRange(1, BLUNDER_OUTPUT, BLUNDER_RANGE)).not.toThrow();
+    expect(() => assertInRange(-0.1, BLUNDER_OUTPUT, BLUNDER_RANGE)).toThrow(/blunder/);
+    expect(() => assertInRange(4.2, BLUNDER_OUTPUT, BLUNDER_RANGE)).toThrow(/blunder/);
   });
 });

@@ -9,7 +9,9 @@ and data pipeline live in `rukh` and the course in `rukh-lab` (lab.rukh.borjagle
 The demo is a single screen and stays that way: the board, the model panel (stage, Elo, consent,
 download progress, backend, status, colour) and the move list (SAN in pairs, undo, new game,
 export PGN). Everything else (sampling controls, unmasked mode, latency waterfall, top-5 arrows)
-lives in the **"Más" drawer**, closed by default, and never touches this screen.
+lives in the **"Más" drawer**, closed by default, and never touches this screen. The encoder's
+evaluation bar is optional and adds nothing to the screen until it is turned on: vertical beside
+the board from 900 px, horizontal under it below that.
 
 - Board size: `min(100vw - 2*gutter, 100dvh - header - controls, 640px)`; panel on the right from
   900 px, below the board under that. Never a horizontal scroll bar; `env(safe-area-inset-bottom)`.
@@ -71,12 +73,19 @@ exercises the real worker path without touching the Hub.
 The Elo selector (1200-2400 in steps of 100) stays disabled until the Elo-conditioned checkpoints
 of M4 land; the prompt already carries both Elo tokens.
 
-### Consent
+### Consent (two of them)
 
 Nothing is downloaded when the page loads. The model panel shows the stage, its size in MB, the
 model licence (Apache-2.0) and, when the browser reports `saveData`, an extra warning; the
 download starts only when you press **Jugar**. Weights are kept in the Cache API under a
-versioned bucket and "Borrar modelos descargados" empties it.
+versioned bucket and "Borrar modelos descargados" empties it (both models at once: one bucket).
+
+The evaluation bar asks **separately**, under "Barra de evaluación", with its own size, the same
+licence and its own `saveData` warning; pressing **Activar la barra** is what downloads the
+encoder. Accepting the decoder never implies accepting the encoder, and the other way round: they
+are two models, two workers and two decisions. Once both are loaded the panel prints the combined
+figure (`Descargado en total: 110 MB (modelo 80 MB + barra 30 MB)`), because that total is what
+the browser actually pulled and what a data plan actually pays for.
 
 ### Worker, WebGPU and WASM
 
@@ -96,6 +105,17 @@ an async call.
 The worker pins `ort.env.wasm.numThreads = 1` and `ort.env.wasm.proxy = false`, isolated or not.
 WASM here is only the fallback (WebGPU is the fast path and the decoder is 40 MB), and more
 threads or the proxy would make ORT reach for artefacts that are not published.
+
+**Two workers, never one.** `src/workers/encoder.worker.ts` is a second dedicated worker, built
+exactly like the decoder's and created at the call site in `encoder-client.ts` from the same
+`new Worker(new URL(...), { type: 'module' })` literal, so the build emits two chunks and
+`tests/worker-chunk.test.ts` checks both. Sharing a worker would be the bug: ORT creates sessions
+one at a time and cannot re-enter `run`, so one queue would mean the evaluation waits for the
+model's move and the model's move waits for the evaluation. What the two share is code, not
+state: `src/workers/ort-runtime.ts` (the ORT setup, the serial queue, the WebGPU/WASM choice with
+its fallback reason and the Cache API download), `src/workers/rpc.ts` (ids, promises and progress
+on the main thread), `src/lib/download.ts` and `src/lib/contract.ts`. Each worker keeps its own
+session, its own queue and its own place in the browser's scheduler.
 
 ### Publishing the ORT runtime, and the COOP/COEP finding
 
@@ -152,6 +172,75 @@ dropped first), asks the worker for the last step's logits, masks every token th
 sampled and the three timings. With the drawer's "sin máscara" on, an illegal proposal is reported
 in the move list instead of being played and the move is drawn again with the mask on, so the game
 continues and the legality rate stays honest.
+
+## The evaluation bar (the encoder)
+
+A second model, fine-tuned from the masked encoder of M3, draws the bar beside the board and
+raises the blunder alert. It is optional: without it the screen is exactly the one above.
+
+### Encoder stages
+
+| Stage          | Label          | Where it comes from                            | Size   |
+| -------------- | -------------- | ---------------------------------------------- | ------ |
+| `encoder-fp16` | Encoder (fp16) | `chorcat/rukh-encoder`, `onnx/model-fp16.onnx` | ~30 MB |
+| `encoder-int8` | Encoder (int8) | `chorcat/rukh-encoder`, `onnx/model-int8.onnx` | ~15 MB |
+
+They live in `ENCODER_STAGES` and their sizes in `ENCODER_SIZE_MB`, provisional in exactly the
+same way as `STAGE_SIZE_MB` and updated in that one place once the real export reports them. They
+are deliberately **not** in `STAGES`: that list is what the "Etapa" selector offers for playing,
+and the encoder never plays. Without `?encoder=` the default is `encoder-int8` on mobile or with
+`saveData` on and `encoder-fp16` otherwise; `?encoder=test` points at the 84 KB toy encoder in
+`public/test/`, which is how the E2E suite walks the real worker path without touching the Hub.
+
+### The contract
+
+`rukh.export.export_encoder_onnx` writes a graph with one input, `idx (B, 69)` int64, and exactly
+two outputs: `value`, the evaluation from White's point of view (`tanh(cp / 400)`, so it lives in
+[-1, 1]), and `blunder`, **already a probability** — the sigmoid is inside the graph and the file
+says so in `rukh_blunder=probability`. Nothing of that metadata is readable from ORT Web, so
+`readEncoderContract` in `src/lib/contract.ts` checks what is: the two outputs exist and are
+called what they are called, every answer carries one number per output, and each number is
+inside the range its head can produce. A file that fails any of those is refused before the bar
+is drawn, because a bar read off the wrong tensor is a plausible-looking lie.
+
+### The 69 tokens
+
+The encoder reads the _position_, not the game: `src/lib/chess-lm/squares.ts` is the TypeScript
+twin of `rukh/src/rukh/models/squares.py` and turns a FEN into exactly 69 ids — `<cls>`, the 64
+squares file-major (a1, a2, ..., h8), the side to move, one token for the 16 castling
+combinations, the en-passant file and the bucketed halfmove clock. `src/lib/chess-lm/fixtures/squares.json`
+is generated from the Python module itself (its vocabulary, its hash and the ids it answers for
+44 positions, from the starting position to promotions, all four castling rights, en passant and
+a 137-halfmove endgame) and `tests/squares.test.ts` replays every one of them.
+
+### The bar and the alert
+
+`src/islands/EvalBar.tsx` draws the fill from the value (White grows from the bottom when it is
+vertical, from the left when it is horizontal), with a 140 ms transition that the global
+`prefers-reduced-motion` rule turns off. The number is always printed with its sign and the track
+carries a label in words (`+0.42 · ventaja de las blancas`), so nothing about the bar depends on
+telling two colours apart. When `blunder` crosses 0.5 a discreet line appears under the board
+naming the move it is about (`Posible error en Rb8 · 79 % según el encoder`): the head answers
+about the move that led to this position, and an alert that does not name it is an accusation
+with no defendant. In the starting position there is no move to name and no alert.
+
+Every position the board settles on is evaluated, and an answer about a position that is no
+longer on the board is dropped instead of drawn.
+
+### The toy encoder
+
+`public/test/toy-encoder.onnx` (84 KB) is a one-layer, `d_model=8` encoder with the real contract
+and the real `rukh_*` metadata, written by `rukh.export.export_encoder_onnx` — the same function
+that writes the published file. Its weights are random, and after the initialisation its two
+linear heads are re-centred and rescaled: a mean-pooled `d_model=8` encoder answers almost the
+same number for every position (value around -0.97, blunder around 0.01), so the bar would never
+move and the alert could never cross 0.5. The `value` head keeps its random direction, centred
+and scaled to span (-1, 1); the `blunder` head is pointed along the first principal component of
+the pooled representations and centred on the median, so the probability lands on both sides of
+0.5 over a game. Nothing else is touched: the graph, the two outputs, the sigmoid inside them and
+the metadata are the real ones. Regenerate it with `export_encoder_onnx` on a tiny
+`EncoderConfig(input='squares', n_layer=1, n_head=2, d_model=8, d_ff=16)` and check that it still
+weighs under 200 KB.
 
 ## Mock mode
 
@@ -222,18 +311,22 @@ src/islands/ModelPanel.tsx, MoveList.tsx
 src/lib/game.ts           pure rules wrapper: applyMove, undoPair, toPgn, legalTargets
 src/lib/opponent.ts       Opponent interface + firstLegalMove
 src/islands/More.tsx      the drawer: sampling, unmasked, latency, top-5, arrows
+src/islands/EvalBar.tsx   the encoder's bar and the blunder alert
 src/workers/decoder.worker.ts  ONNX Runtime session, download and logits
 src/workers/decoder-client.ts  main-thread handle (owns the `new Worker` literal)
+src/workers/encoder.worker.ts, encoder-client.ts  the same, for the evaluation bar
+src/workers/ort-runtime.ts  ORT setup, serial queue, backend choice and download (shared)
+src/workers/rpc.ts        ids, promises and progress for both clients (shared)
 src/lib/model.ts          prompt, legality mask, sampling and timings
 src/lib/worker-protocol.ts typed messages, ORT version and the model cache name
-src/lib/registry.ts       model stages, sizes and Hub URLs
-src/lib/query.ts          ?mock, ?stage, ?color
-src/lib/chess-lm/         UCI, SAN char and BPE tokenizers + synced vocab, BPE and fixtures
+src/lib/registry.ts       model and encoder stages, sizes and Hub URLs
+src/lib/query.ts          ?mock, ?stage, ?encoder, ?color
+src/lib/chess-lm/         UCI, SAN char and BPE tokenizers, the squares scheme, vocab and fixtures
 src/styles/tokens.css     design tokens copied from rukh-lab (hash-locked)
 src/styles/board.css      board theme derived from the tokens
 public/ort/<version>/     self-hosted ORT runtime (generated, git-ignored)
-public/test/              169 KB toy decoder served at ?stage=test
-e2e/                      game, layout, a11y and model specs
+public/test/              169 KB toy decoder (?stage=test), 84 KB toy encoder (?encoder=test)
+e2e/                      game, layout, a11y, model and encoder specs
 e2e/fixtures/coi-server.mjs  dist/ served with the production headers and MIME types
 nginx/, Dockerfile        static serving with COOP/COEP and security headers
 ```

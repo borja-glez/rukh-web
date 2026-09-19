@@ -1,4 +1,4 @@
-import { computed, signal } from '@preact/signals';
+import { computed, effect, signal } from '@preact/signals';
 import { useEffect } from 'preact/hooks';
 import {
   applyMove,
@@ -21,11 +21,22 @@ import {
 import { firstLegalMove, type Opponent } from '../lib/opponent';
 import { parseQuery } from '../lib/query';
 import type { ModelContract } from '../lib/contract';
-import { findStage, modelUrl, stageBlock, STAGES, type Stage } from '../lib/registry';
+import {
+  encoderBlock,
+  findEncoderStage,
+  findStage,
+  modelUrl,
+  stageBlock,
+  ENCODER_STAGES,
+  STAGES,
+  type Stage,
+} from '../lib/registry';
 import { MODEL_CACHE, type Backend, type ProgressMessage } from '../lib/worker-protocol';
-import { UciTokenizer } from '../lib/chess-lm';
+import { fenToTokens, UciTokenizer } from '../lib/chess-lm';
 import { createDecoder, type Decoder } from '../workers/decoder-client';
+import { createEncoder, type Encoder } from '../workers/encoder-client';
 import Board from './Board';
+import EvalBar, { type Evaluation } from './EvalBar';
 import ModelPanel from './ModelPanel';
 import More from './More';
 import MoveList from './MoveList';
@@ -36,6 +47,13 @@ const WATERFALL_LENGTH = 10;
 
 /** Model lifecycle: nothing is downloaded before the user consents in the `consent` step. */
 export type ModelStatus = 'mock' | 'consent' | 'loading' | 'ready' | 'error';
+
+/**
+ * The encoder's own lifecycle. It is a second model with a second consent: having accepted the
+ * 40 MB of the decoder says nothing about accepting the 30 MB of the evaluation bar, so the bar
+ * asks for itself and stays at `consent` until it is told otherwise.
+ */
+export type EncoderStatus = 'consent' | 'loading' | 'ready' | 'error';
 
 /** Outcome of "Borrar modelos descargados": what `caches.delete` answered, or why it could not. */
 export interface ClearCacheResult {
@@ -75,15 +93,28 @@ const maskIllegal = signal(true);
 const showArrows = signal(false);
 const elo = signal(1800);
 
+/** The evaluation bar: its own stage, its own consent, its own worker. */
+const encoderStage = signal<string>(ENCODER_STAGES[0].id);
+const encoderStatus = signal<EncoderStatus>('consent');
+const encoderProgress = signal<ProgressMessage | null>(null);
+const encoderBackend = signal<Backend | null>(null);
+const encoderError = signal<string | null>(null);
+const evaluation = signal<Evaluation | null>(null);
+
 const top5 = signal<TopEntry[]>([]);
 const waterfall = signal<Timings[]>([]);
 /** Raw token of the last illegal proposal (unmasked mode); shown in the move list. */
 const illegal = signal<string | null>(null);
 
 let decoder: Decoder | null = null;
+let encoder: Encoder | null = null;
 
 function currentStage(): Stage {
   return findStage(stage.value) ?? STAGES[0];
+}
+
+function currentEncoderStage(): Stage {
+  return findEncoderStage(encoderStage.value) ?? ENCODER_STAGES[0];
 }
 
 function opponentToMove(state: GameState): boolean {
@@ -174,6 +205,8 @@ function startNewGame() {
   game.value = newGame();
   top5.value = [];
   illegal.value = null;
+  // The bar belongs to a position that no longer exists; the effect below refills it.
+  evaluation.value = null;
   void settle();
 }
 
@@ -187,6 +220,7 @@ function undo() {
   if (busy.value || !canUndo(game.value, human.value)) return;
   game.value = undoPair(game.value, human.value);
   illegal.value = null;
+  evaluation.value = null;
   // As black, undo leaves the opponent to move: let it reply.
   void settle();
 }
@@ -224,6 +258,54 @@ async function load() {
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause);
     status.value = 'error';
+  }
+}
+
+/**
+ * Downloads the encoder and creates its session. Only ever called from the bar's own consent
+ * step, which is separate from the decoder's on purpose (see `EncoderStatus`).
+ */
+async function loadEncoder() {
+  const entry = currentEncoderStage();
+  encoderStatus.value = 'loading';
+  encoderError.value = null;
+  encoderProgress.value = null;
+  try {
+    encoder ??= createEncoder();
+    const ready = await encoder.init(
+      {
+        stage: entry.id,
+        url: modelUrl(entry),
+        sizeBytes: Math.round(entry.sizeMb * 1_000_000),
+        block: encoderBlock(entry),
+      },
+      (update) => (encoderProgress.value = update),
+    );
+    encoderBackend.value = ready.backend;
+    encoderStatus.value = 'ready';
+  } catch (cause) {
+    encoderError.value = cause instanceof Error ? cause.message : String(cause);
+    encoderStatus.value = 'error';
+  }
+}
+
+/**
+ * Evaluates the position on the board. The worker serialises its own runs, so a burst of moves
+ * only queues; what matters here is that an answer about a position that is no longer on the
+ * board is dropped instead of drawn.
+ */
+async function evaluatePosition(state: GameState) {
+  const source = encoder;
+  if (!source || encoderStatus.value !== 'ready') return;
+  const fen = state.fen;
+  const move = state.history.length > 0 ? state.history[state.history.length - 1] : null;
+  try {
+    const answer = await source.evaluate(fenToTokens(fen));
+    if (game.value.fen !== fen) return;
+    evaluation.value = { value: answer.value, blunder: answer.blunder, move };
+  } catch (cause) {
+    encoderError.value = cause instanceof Error ? cause.message : String(cause);
+    encoderStatus.value = 'error';
   }
 }
 
@@ -280,6 +362,7 @@ export default function App() {
   useEffect(() => {
     const query = parseQuery(window.location.search);
     stage.value = query.stage;
+    encoderStage.value = query.encoder;
     status.value = currentStage().kind === 'mock' ? 'mock' : 'consent';
     if (query.color !== human.value) {
       human.value = query.color;
@@ -287,17 +370,33 @@ export default function App() {
     void settle();
   }, []);
 
+  // Every position the board settles on is evaluated, and so is the one already on the board
+  // when the encoder becomes ready (the effect reads `encoderStatus` too). It is an `effect`
+  // rather than a dependency array because `App` does not re-render when `game` changes: it only
+  // hands the signal to its children.
+  useEffect(
+    () =>
+      effect(() => {
+        const state = game.value;
+        if (encoderStatus.value === 'ready') void evaluatePosition(state);
+      }),
+    [],
+  );
+
   return (
     <>
-      <Board
-        game={game}
-        human={human}
-        thinking={busy}
-        turning={turning}
-        top5={top5}
-        arrows={showArrows}
-        onMove={playHuman}
-      />
+      <div class="board-area" data-testid="board-area" data-eval={evaluation.value ? 'on' : 'off'}>
+        <Board
+          game={game}
+          human={human}
+          thinking={busy}
+          turning={turning}
+          top5={top5}
+          arrows={showArrows}
+          onMove={playHuman}
+        />
+        <EvalBar evaluation={evaluation} />
+      </div>
       <aside class="panel" data-testid="panel" aria-label="Modelo y jugadas">
         <ModelPanel
           game={game}
@@ -314,6 +413,12 @@ export default function App() {
           onColor={chooseColor}
           onPlay={() => void load()}
           onClearCache={clearCache}
+          encoderStage={encoderStage}
+          encoderStatus={encoderStatus}
+          encoderProgress={encoderProgress}
+          encoderBackend={encoderBackend}
+          encoderError={encoderError}
+          onEncoder={() => void loadEncoder()}
         />
         <MoveList
           game={game}

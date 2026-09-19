@@ -1,14 +1,22 @@
 import type { Signal } from '@preact/signals';
 import { useEffect, useState } from 'preact/hooks';
 import type { Color, GameState } from '../lib/game';
-import { findStage, MODEL_LICENSE, selectableStages, STAGES } from '../lib/registry';
+import {
+  findEncoderStage,
+  findStage,
+  totalSizeMb,
+  ENCODER_STAGES,
+  MODEL_LICENSE,
+  selectableStages,
+  STAGES,
+} from '../lib/registry';
 import {
   megabytes,
   progressPercent,
   type Backend,
   type ProgressMessage,
 } from '../lib/worker-protocol';
-import type { ClearCacheResult, ModelStatus } from './App';
+import type { ClearCacheResult, EncoderStatus, ModelStatus } from './App';
 
 interface Props {
   game: Signal<GameState>;
@@ -26,6 +34,13 @@ interface Props {
   onColor: (color: Color) => void;
   onPlay: () => void;
   onClearCache: () => Promise<ClearCacheResult>;
+  /** The evaluation bar's model: a second download, asked for separately. */
+  encoderStage: Signal<string>;
+  encoderStatus: Signal<EncoderStatus>;
+  encoderProgress: Signal<ProgressMessage | null>;
+  encoderBackend: Signal<Backend | null>;
+  encoderError: Signal<string | null>;
+  onEncoder: () => void;
 }
 
 /** What the "Borrar modelos descargados" button says, once it has been pressed. */
@@ -78,6 +93,12 @@ export default function ModelPanel({
   onColor,
   onPlay,
   onClearCache,
+  encoderStage,
+  encoderStatus,
+  encoderProgress,
+  encoderBackend,
+  encoderError,
+  onEncoder,
 }: Props) {
   const state = game.value;
   const color = human.value;
@@ -85,6 +106,9 @@ export default function ModelPanel({
   const current = findStage(stage.value) ?? STAGES[0];
   const phase = status.value;
   const download = progress.value;
+  const encoder = findEncoderStage(encoderStage.value) ?? ENCODER_STAGES[0];
+  const encoderPhase = encoderStatus.value;
+  const encoderDownload = encoderProgress.value;
   const [cache, setCache] = useState<CacheState>('idle');
 
   // The answer is temporary: without this the button would keep claiming "Modelos borrados"
@@ -199,6 +223,72 @@ export default function ModelPanel({
           {error.value ?? 'No se ha podido cargar el modelo'}
         </p>
       ) : null}
+
+      {/* The evaluation bar is a second model with a second consent: accepting the decoder says
+          nothing about accepting these extra MB, so it asks for itself. */}
+      <section class="encoder" aria-labelledby="encoder-title">
+        <h3 id="encoder-title" class="label">
+          Barra de evaluación
+        </h3>
+        {encoderPhase === 'consent' ? (
+          <div class="consent" data-testid="encoder-consent">
+            <p class="consent__text">
+              Opcional: <strong>{encoder.label}</strong> se descarga aparte desde Hugging Face:{' '}
+              {encoder.sizeMb} MB, licencia {MODEL_LICENSE}. Dibuja el valor de la posición y avisa
+              de posibles errores.
+            </p>
+            {saveData() ? (
+              <p class="consent__warn caption" data-testid="encoder-save-data">
+                Tienes el ahorro de datos activado: esta segunda descarga consume {encoder.sizeMb}{' '}
+                MB más.
+              </p>
+            ) : null}
+            <button type="button" class="btn" data-testid="encoder-play" onClick={onEncoder}>
+              Activar la barra
+            </button>
+          </div>
+        ) : null}
+
+        {encoderPhase === 'loading' ? (
+          <div class="model__loading" data-testid="encoder-loading">
+            {/* The caption below says the same thing in words, so the bar is decorative. */}
+            <progress
+              class="bar"
+              aria-hidden="true"
+              value={encoderDownload?.loaded ?? 0}
+              max={Math.max(encoderDownload?.total ?? 1, 1)}
+            />
+            <span class="caption" data-testid="encoder-progress">
+              {encoderDownload
+                ? `${megabytes(encoderDownload.loaded)} / ${megabytes(encoderDownload.total)} MB · ${progressPercent(encoderDownload)} %`
+                : 'Preparando la descarga…'}
+            </span>
+          </div>
+        ) : null}
+
+        {encoderPhase === 'ready' && encoderBackend.value ? (
+          <>
+            <p class="model__status caption" data-testid="encoder-ready">
+              <span class="badge" data-testid="encoder-backend">
+                {BACKEND_LABEL[encoderBackend.value]}
+              </span>{' '}
+              {encoder.label}
+            </p>
+            {phase === 'ready' ? (
+              <p class="model__status caption" data-testid="total-size">
+                Descargado en total: {totalSizeMb(current, encoder)} MB (modelo {current.sizeMb} MB
+                + barra {encoder.sizeMb} MB).
+              </p>
+            ) : null}
+          </>
+        ) : null}
+
+        {encoderPhase === 'error' ? (
+          <p class="model__error caption" role="alert" data-testid="encoder-error">
+            {encoderError.value ?? 'No se ha podido cargar el encoder'}
+          </p>
+        ) : null}
+      </section>
 
       <p class="model__turn" data-testid="status" data-thinking={busy.value ? 'true' : 'false'}>
         {statusText(state, color, busy.value)}

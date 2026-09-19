@@ -49,7 +49,15 @@ export const RUN_SOURCE = 'la primera respuesta del modelo';
  * (or reports nothing at all, which is what the WASM backend does for some graphs).
  */
 export function declaredVocab(session: SessionLike): number | null {
-  const name = session.outputNames[0];
+  return declaredLastDim(session, session.outputNames[0]);
+}
+
+/**
+ * The fixed last dimension ORT declares for one named output, or `null` when it is symbolic (or
+ * when there is no metadata at all). The encoder's two outputs need the same reading as the
+ * decoder's single one, so the lookup lives here and both go through it.
+ */
+export function declaredLastDim(session: SessionLike, name: string): number | null {
   const meta = session.outputMetadata?.find((entry) => entry.name === name);
   const shape = meta?.shape;
   if (!shape || shape.length === 0) return null;
@@ -84,4 +92,77 @@ export function readContract(
   const declared = declaredVocab(session);
   if (declared !== null) assertVocab(declared, expectedVocab, DECLARED_SOURCE);
   return { block, vocab: declared ?? expectedVocab };
+}
+
+// ------------------------------------------------------------------
+// The encoder's contract: two outputs instead of one
+// ------------------------------------------------------------------
+//
+// The same reasoning as above, with a different shape to check. `rukh.export.export_encoder_onnx`
+// writes a graph with exactly two outputs, `value` and `blunder`, one scalar per position each
+// (the exported heads squeeze the last axis, so ORT reports `[batch]`), and it puts the sigmoid
+// of the blunder logit *inside* the graph — `rukh_blunder=probability` in the metadata. None of
+// that is readable from ORT Web, so what the browser can check is: the two outputs are there and
+// they are called what they are called; every answer carries one number per output; and the two
+// numbers are inside the range their heads can produce (`tanh` and a sigmoid). A file that fails
+// any of those is not the encoder the bar was written for, and a bar drawn from the wrong tensor
+// would be a plausible-looking lie.
+
+export const VALUE_OUTPUT = 'value';
+export const BLUNDER_OUTPUT = 'blunder';
+
+/** The two outputs the demo reads, in order. */
+export const ENCODER_OUTPUTS = [VALUE_OUTPUT, BLUNDER_OUTPUT] as const;
+
+/** The contract a loaded encoder session is playing under. */
+export interface EncoderContract {
+  /** Tokens the graph is fed, from the registry (`squares`: 69). */
+  block: number;
+  /** Output names, in the order `evaluate` reads them. */
+  outputs: readonly [string, string];
+}
+
+/** Range of each head's output: `tanh` for the value, a probability for the blunder. */
+export const VALUE_RANGE = [-1, 1] as const;
+export const BLUNDER_RANGE = [0, 1] as const;
+
+/**
+ * The contract of a freshly created encoder session: the two outputs by name, their declared
+ * width when ORT gives a fixed one, and the `block` the registry declares for the stage.
+ */
+export function readEncoderContract(session: SessionLike, block: number): EncoderContract {
+  if (!Number.isInteger(block) || block < MIN_BLOCK) {
+    throw new Error(`El contexto declarado para el encoder (${block}) no es utilizable.`);
+  }
+  const missing = ENCODER_OUTPUTS.filter((name) => !session.outputNames.includes(name));
+  if (missing.length > 0 || session.outputNames.length !== ENCODER_OUTPUTS.length) {
+    throw new Error(
+      `Este fichero no es el encoder de la barra: se esperaban las salidas ` +
+        `${ENCODER_OUTPUTS.join(' y ')} y trae ${session.outputNames.join(', ') || 'ninguna'}. ` +
+        `Borra los modelos descargados y vuelve a intentarlo.`,
+    );
+  }
+  for (const name of ENCODER_OUTPUTS) {
+    const declared = declaredLastDim(session, name);
+    if (declared !== null) assertScalarOutput(declared, name, DECLARED_SOURCE);
+  }
+  return { block, outputs: [VALUE_OUTPUT, BLUNDER_OUTPUT] };
+}
+
+/** Throws when an encoder output carries more than one number for the position being evaluated. */
+export function assertScalarOutput(width: number, name: string, source: string): void {
+  if (width === 1) return;
+  throw new Error(
+    `La salida ${name} del encoder no es un único valor: ${source} da ${width}. No se dibuja la ` +
+      `barra con este fichero; borra los modelos descargados y vuelve a intentarlo.`,
+  );
+}
+
+/** Throws when a head answers outside the range its own activation can produce. */
+export function assertInRange(value: number, name: string, [low, high]: readonly [number, number]) {
+  if (Number.isFinite(value) && value >= low && value <= high) return;
+  throw new Error(
+    `La salida ${name} del encoder (${value}) se sale del rango [${low}, ${high}] que su cabeza ` +
+      `puede producir: el fichero no es el que espera la barra.`,
+  );
 }

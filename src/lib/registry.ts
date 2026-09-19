@@ -1,4 +1,4 @@
-export type StageKind = 'mock' | 'onnx';
+export type StageKind = 'mock' | 'onnx' | 'encoder';
 
 export interface Stage {
   id: string;
@@ -94,9 +94,95 @@ export const TEST_STAGE: Stage = {
   block: DEFAULT_BLOCK,
 };
 
+// ------------------------------------------------------------------
+// The encoder: a second model, a second worker and a second consent
+// ------------------------------------------------------------------
+//
+// The evaluation bar reads its own file (`chorcat/rukh-encoder`), downloaded by its own worker
+// only after its own consent step. It is deliberately kept out of `STAGES`: that list is what the
+// "Etapa" selector offers for *playing*, and the encoder never plays. `block` is 69 because the
+// `squares` scheme is exactly 69 tokens (`src/lib/chess-lm/squares.ts`), not a context window
+// that could be cropped: the worker refuses a position of any other length.
+
+/** Tokens the `squares` scheme feeds the encoder; `SQUARE_TOKENS` in Python and in TypeScript. */
+export const ENCODER_BLOCK = 69;
+
+/**
+ * Download sizes in MB of the encoder exports. **Provisional**, exactly like `STAGE_SIZE_MB`:
+ * they are the plan's estimates and the controller updates them here, in this one place, once the
+ * real export reports the file sizes. They only drive the consent copy and the progress bar
+ * fallback, never the download itself.
+ */
+export const ENCODER_SIZE_MB = {
+  'encoder-fp16': 30,
+  'encoder-int8': 15,
+} as const;
+
+export const ENCODER_STAGES: Stage[] = [
+  {
+    id: 'encoder-fp16',
+    label: 'Encoder (fp16)',
+    kind: 'encoder',
+    repo: 'chorcat/rukh-encoder',
+    file: 'onnx/model-fp16.onnx',
+    sizeMb: ENCODER_SIZE_MB['encoder-fp16'],
+    block: ENCODER_BLOCK,
+  },
+  {
+    id: 'encoder-int8',
+    label: 'Encoder (int8)',
+    kind: 'encoder',
+    repo: 'chorcat/rukh-encoder',
+    file: 'onnx/model-int8.onnx',
+    sizeMb: ENCODER_SIZE_MB['encoder-int8'],
+    block: ENCODER_BLOCK,
+  },
+];
+
+/**
+ * Toy encoder committed under `public/test/`: one layer, `d_model=8`, the real contract
+ * (`idx (B, 69)` int64 -> `value` and `blunder`, the sigmoid inside the graph) and the same
+ * `rukh_*` metadata, written by the very function that writes the published file
+ * (`rukh.export.export_encoder_onnx`). Reached only with `?encoder=test`, which is how the E2E
+ * suite walks the real worker path — contract check included — without downloading 30 MB.
+ */
+export const TEST_ENCODER_STAGE: Stage = {
+  id: 'test',
+  label: 'Encoder de juguete (pruebas)',
+  kind: 'encoder',
+  sizeMb: 0.1,
+  url: '/test/toy-encoder.onnx',
+  block: ENCODER_BLOCK,
+};
+
 export function findStage(id: string): Stage | undefined {
   if (id === TEST_STAGE.id) return TEST_STAGE;
   return STAGES.find((stage) => stage.id === id);
+}
+
+/** The encoder stage with this id, or undefined. Separate from `findStage`: separate models. */
+export function findEncoderStage(id: string): Stage | undefined {
+  if (id === TEST_ENCODER_STAGE.id) return TEST_ENCODER_STAGE;
+  return ENCODER_STAGES.find((stage) => stage.id === id);
+}
+
+/** The number of tokens an encoder stage is fed; `ENCODER_BLOCK` when a stage omits it. */
+export function encoderBlock(stage: Stage): number {
+  return stage.block ?? ENCODER_BLOCK;
+}
+
+/**
+ * Encoder chosen when the page is opened without `?encoder=`: the 15 MB int8 export on mobile or
+ * with data saver on, the 30 MB fp16 one elsewhere — the same rule as the decoder's.
+ */
+export function defaultEncoderId(conditions: Conditions = {}): string {
+  return conditions.saveData || conditions.mobile ? 'encoder-int8' : 'encoder-fp16';
+}
+
+/** MB the browser has been asked to download in total, for the "both loaded" line. */
+export function totalSizeMb(...stages: readonly (Stage | undefined)[]): number {
+  const total = stages.reduce((sum, stage) => sum + (stage?.sizeMb ?? 0), 0);
+  return Math.round(total * 10) / 10;
 }
 
 /** Hub URL of a stage, or its own `url` when it is served from this origin. */

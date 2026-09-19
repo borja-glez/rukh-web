@@ -40,6 +40,23 @@ describe('worker protocol', () => {
     expect(asResponse({ type: 'error', id: 1, message: 'boom' })).not.toBeNull();
   });
 
+  it('narrows the encoder responses too', () => {
+    // The two workers share the envelope: same ids, same progress, same errors, own verbs.
+    const ready: WorkerResponse = {
+      type: 'encoder-ready',
+      id: 4,
+      backend: 'wasm',
+      loadMs: 30,
+      block: 69,
+      outputs: ['value', 'blunder'],
+    };
+    expect(asResponse(ready)).toBe(ready);
+    expect(
+      asResponse({ type: 'evaluation', id: 4, value: -0.5, blunder: 0.9, inferMs: 2 }),
+    ).not.toBeNull();
+    expect(asResponse({ type: 'evaluate', id: 4 })).toBeNull();
+  });
+
   it('rejects anything else', () => {
     expect(asResponse(null)).toBeNull();
     expect(asResponse('ready')).toBeNull();

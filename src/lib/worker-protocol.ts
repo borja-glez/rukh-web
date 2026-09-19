@@ -1,10 +1,16 @@
-// Messages exchanged with `src/workers/decoder.worker.ts`. Both sides import this module, so a
-// change to a payload breaks the build on the side that did not follow.
+// Messages exchanged with the two workers (`src/workers/decoder.worker.ts` and
+// `encoder.worker.ts`). Both sides import this module, so a change to a payload breaks the build
+// on the side that did not follow.
 //
 // The flow is always the same: `init` (download + session) answers with `progress`* and then
 // `ready` or `error`; `logits` answers with `logits` or `error`; `dispose` answers with
 // `disposed`. Every request carries an `id` the answer echoes, so the client can correlate
 // replies even though the worker already serialises the work.
+//
+// The encoder speaks the same dialect with its own verbs (`encoder-init`, `evaluate`) because it
+// answers something else: two scalars per position instead of a logits vector. The download, the
+// progress, the dispose and the error payloads are literally the same messages — one worker per
+// model, one protocol for both.
 
 /** ONNX Runtime Web version; `scripts/copy-assets.mjs` copies that release into `public/ort/`. */
 export const ORT_VERSION = '1.30.0';
@@ -47,7 +53,28 @@ export interface DisposeRequest {
   id: number;
 }
 
-export type WorkerRequest = InitRequest | LogitsRequest | DisposeRequest;
+/** Everything `encoder.worker.ts` needs to download a stage and create its session. */
+export interface EncoderInitRequest {
+  type: 'encoder-init';
+  id: number;
+  /** Registry stage id, only used for diagnostics and the cache log. */
+  stage: string;
+  url: string;
+  sizeBytes: number;
+  /** Tokens the scheme feeds the graph (`squares` is always 69), from the registry. */
+  block: number;
+}
+
+export interface EvaluateRequest {
+  type: 'evaluate';
+  id: number;
+  /** The `squares` token ids of one position; exactly `block` of them. */
+  ids: number[];
+}
+
+export type DecoderRequest = InitRequest | LogitsRequest | DisposeRequest;
+export type EncoderRequest = EncoderInitRequest | EvaluateRequest | DisposeRequest;
+export type WorkerRequest = DecoderRequest | EncoderRequest;
 
 export interface ProgressMessage {
   type: 'progress';
@@ -75,6 +102,28 @@ export interface LogitsMessage {
   inferMs: number;
 }
 
+export interface EncoderReadyMessage {
+  type: 'encoder-ready';
+  id: number;
+  backend: Backend;
+  fallbackReason?: string;
+  loadMs: number;
+  /** Tokens the session was accepted for (`squares`: 69). */
+  block: number;
+  /** The two outputs the contract check found, in order: the value and the blunder head. */
+  outputs: [string, string];
+}
+
+export interface EvaluationMessage {
+  type: 'evaluation';
+  id: number;
+  /** The evaluation from White's point of view, `tanh(cp / 400)` in [-1, 1]. */
+  value: number;
+  /** Probability (the sigmoid is inside the graph) that the last move threw the game away. */
+  blunder: number;
+  inferMs: number;
+}
+
 export interface DisposedMessage {
   type: 'disposed';
   id: number;
@@ -87,9 +136,23 @@ export interface ErrorMessage {
 }
 
 export type WorkerResponse =
-  ProgressMessage | ReadyMessage | LogitsMessage | DisposedMessage | ErrorMessage;
+  | ProgressMessage
+  | ReadyMessage
+  | LogitsMessage
+  | EncoderReadyMessage
+  | EvaluationMessage
+  | DisposedMessage
+  | ErrorMessage;
 
-const RESPONSE_TYPES = ['progress', 'ready', 'logits', 'disposed', 'error'] as const;
+const RESPONSE_TYPES = [
+  'progress',
+  'ready',
+  'logits',
+  'encoder-ready',
+  'evaluation',
+  'disposed',
+  'error',
+] as const;
 
 /**
  * Narrows whatever arrived through `postMessage` to a known response, or `null`. The worker is

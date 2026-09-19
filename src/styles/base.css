@@ -7,6 +7,9 @@
   --tap: 44px;
   /* Panel column plus the grid gap on two columns (see `.play` at >= 900 px). */
   --panel-w: 352px;
+  /* Evaluation bar beside the board on two columns: its column plus the gap. */
+  --evalbar-w: 44px;
+  --evalbar-col: 56px;
 }
 
 *,
@@ -194,9 +197,25 @@ select {
   align-content: start;
 }
 
+/* Board, evaluation bar and blunder alert are one grid item: the bar is under the board on a
+   phone and beside it on a desktop, and the alert always spans the whole width. The columns of
+   the bar only exist when it is on (`data-eval`), so a player without the encoder gets exactly
+   the layout of `docs/05-web-demo.md`. */
+.board-area {
+  display: grid;
+  grid-template-columns: minmax(0, auto);
+  grid-template-areas:
+    'board'
+    'bar'
+    'alert';
+  justify-items: center;
+  gap: 10px;
+}
+
 /* Single column: the panel stacks below and the page scrolls, so only the width limits the
    board (a landscape phone keeps a usable board instead of one squeezed by the height). */
 .board {
+  grid-area: board;
   --board-size: min(100vw - 2 * var(--gutter), 640px);
   width: var(--board-size);
   max-width: 100%;
@@ -224,6 +243,28 @@ select {
   .board {
     --board-size: min(
       100vw - 2 * var(--gutter) - var(--panel-w),
+      100dvh - var(--header-h) - 2 * var(--gutter),
+      640px
+    );
+  }
+
+  .board-area[data-eval='on'] {
+    /* `minmax(0, auto)`, never plain `auto`: the board asks for `--board-size` and the column
+       has to be allowed to shrink below it, or the bar's column pushes the board out of the
+       grid (and off the 1080 px page) instead of taking width from it. */
+    grid-template-columns: minmax(0, auto) var(--evalbar-w);
+    grid-template-areas:
+      'board bar'
+      'alert alert';
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  /* The bar takes a column of its own, so the board gives it back its width: without this the
+     two columns plus the panel overflow the viewport at the narrow end of the breakpoint. */
+  .board-area[data-eval='on'] .board {
+    --board-size: min(
+      100vw - 2 * var(--gutter) - var(--panel-w) - var(--evalbar-col),
       100dvh - var(--header-h) - 2 * var(--gutter),
       640px
     );
@@ -370,6 +411,15 @@ select {
   color: var(--brand);
 }
 
+/* The evaluation bar's own consent, under a rule: two models, two decisions. */
+.encoder {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .badge {
   display: inline-block;
   padding: 2px 8px;
@@ -409,6 +459,119 @@ select {
 
 .moves__illegal {
   color: var(--brand);
+}
+
+/* ------------------------------------------------------------------
+   Evaluation bar · horizontal under the board, vertical beside it
+   ------------------------------------------------------------------ */
+.evalbar {
+  grid-area: bar;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.evalbar__track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--hover-soft);
+  overflow: hidden;
+}
+
+/* The halfway mark: without it a bar with no scale says nothing about where the middle is. */
+.evalbar__track::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+
+/* `--eval-fill` is White's share of the bar, set as a style *attribute* by the island (the CSP
+   allows attributes, never `style-src` itself). The transition is 140 ms and the global
+   `prefers-reduced-motion` rule above turns it off. */
+.evalbar__fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--eval-fill, 50%);
+  background: var(--accent);
+  transition: width 140ms ease;
+}
+
+.evalbar__value {
+  margin: 0;
+  min-width: 3.5em;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Text, never colour alone: the alert names the move it is talking about. */
+.evalbar__alert {
+  grid-area: alert;
+  margin: 0;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--brand);
+  border-radius: 8px;
+  color: var(--brand);
+  font-size: 13px;
+}
+
+.evalbar__alert-tag {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+@media (min-width: 900px) {
+  .evalbar {
+    flex-direction: column;
+    width: var(--evalbar-w);
+    height: 100%;
+  }
+
+  .evalbar__track {
+    width: 14px;
+    height: auto;
+    flex: 1 1 auto;
+  }
+
+  .evalbar__track::after {
+    left: 0;
+    right: 0;
+    top: 50%;
+    bottom: auto;
+    width: auto;
+    height: 1px;
+  }
+
+  /* Vertical: White grows from the bottom, which is how every evaluation bar is read. */
+  .evalbar__fill {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    height: var(--eval-fill, 50%);
+    transition: height 140ms ease;
+  }
+
+  .evalbar__value {
+    min-width: 0;
+    text-align: center;
+    font-size: 11px;
+  }
 }
 
 /* ------------------------------------------------------------------

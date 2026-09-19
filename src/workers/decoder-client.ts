@@ -1,14 +1,9 @@
 // Main-thread side of the decoder worker. The `new Worker(new URL(...), { type: 'module' })`
 // literal lives here, at the call site, because that is the only shape Vite recognises to emit
-// the worker as its own chunk (`tests/worker-chunk.test.ts` guards it).
-import {
-  asResponse,
-  type Backend,
-  type InitRequest,
-  type ProgressMessage,
-  type ReadyMessage,
-  type WorkerRequest,
-} from '../lib/worker-protocol';
+// the worker as its own chunk (`tests/worker-chunk.test.ts` guards it). The request/answer
+// plumbing is in `rpc.ts`, shared with the encoder's client.
+import type { Backend, InitRequest, ProgressMessage, ReadyMessage } from '../lib/worker-protocol';
+import { createRpc, type WorkerLike } from './rpc';
 
 export interface LoadReport {
   backend: Backend;
@@ -38,62 +33,21 @@ export interface Decoder {
   dispose(): Promise<void>;
 }
 
-/** `Omit` over a union collapses it, so the distribution is written out explicitly. */
-type Unidentified<T> = T extends WorkerRequest ? Omit<T, 'id'> : never;
+const DEAD = 'el worker del modelo ya se ha cerrado';
 
-interface Pending {
-  resolve: (value: never) => void;
-  reject: (error: Error) => void;
-  onProgress?: (progress: ProgressMessage) => void;
+/** The real worker; replaced by a fake in the tests. */
+function spawn(): WorkerLike {
+  return new Worker(new URL('./decoder.worker.ts', import.meta.url), {
+    type: 'module',
+  }) as unknown as WorkerLike;
 }
 
-export function createDecoder(): Decoder {
-  const worker = new Worker(new URL('./decoder.worker.ts', import.meta.url), { type: 'module' });
-  const pending = new Map<number, Pending>();
-  let nextId = 1;
-  let terminated = false;
-
-  const fail = (error: Error) => {
-    for (const entry of pending.values()) entry.reject(error);
-    pending.clear();
-  };
-
-  worker.addEventListener('message', (event: MessageEvent) => {
-    const message = asResponse(event.data);
-    if (!message) return;
-    const entry = pending.get(message.id);
-    if (!entry) return;
-    if (message.type === 'progress') {
-      entry.onProgress?.(message);
-      return;
-    }
-    pending.delete(message.id);
-    if (message.type === 'error') {
-      entry.reject(new Error(message.message));
-      return;
-    }
-    (entry.resolve as (value: unknown) => void)(message);
-  });
-
-  worker.addEventListener('error', (event: ErrorEvent) => {
-    fail(new Error(event.message || 'el worker del modelo ha fallado'));
-  });
-
-  function send<T>(
-    request: Unidentified<WorkerRequest>,
-    onProgress?: (progress: ProgressMessage) => void,
-  ): Promise<T> {
-    if (terminated) return Promise.reject(new Error('el worker del modelo ya se ha cerrado'));
-    const id = nextId++;
-    return new Promise<T>((resolve, reject) => {
-      pending.set(id, { resolve: resolve as (value: never) => void, reject, onProgress });
-      worker.postMessage({ ...request, id } as WorkerRequest);
-    });
-  }
+export function createDecoder(worker: WorkerLike = spawn()): Decoder {
+  const rpc = createRpc(worker, 'el worker del modelo ha fallado');
 
   return {
     async init(request, onProgress) {
-      const ready = await send<ReadyMessage>({ type: 'init', ...request }, onProgress);
+      const ready = await rpc.send<ReadyMessage>({ type: 'init', ...request }, onProgress);
       return {
         backend: ready.backend,
         fallbackReason: ready.fallbackReason,
@@ -103,19 +57,20 @@ export function createDecoder(): Decoder {
       };
     },
     async logits(ids) {
-      const answer = await send<{ data: Float32Array; inferMs: number }>({ type: 'logits', ids });
+      const answer = await rpc.send<{ data: Float32Array; inferMs: number }>({
+        type: 'logits',
+        ids,
+      });
       return { data: answer.data, inferMs: answer.inferMs };
     },
     async dispose() {
-      if (terminated) return;
+      if (rpc.closed) return;
       try {
-        await send<unknown>({ type: 'dispose' });
+        await rpc.send<unknown>({ type: 'dispose' });
       } catch {
         /* the worker may already be gone; terminating below is enough */
       }
-      terminated = true;
-      fail(new Error('el worker del modelo se ha cerrado'));
-      worker.terminate();
+      rpc.close(DEAD);
     },
   };
 }

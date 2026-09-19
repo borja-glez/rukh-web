@@ -1,7 +1,10 @@
-// Build guard. The decoder worker must be emitted as its own chunk: Vite only does that for the
-// exact `new Worker(new URL('./decoder.worker.ts', import.meta.url), { type: 'module' })` shape,
-// and any other shape (or `worker.format` left at the default) makes it inline the worker as a
-// `data:` URL, which the CSP rejects and which would ship ORT inside the page bundle.
+// Build guard. Each worker must be emitted as its own chunk: Vite only does that for the exact
+// `new Worker(new URL('./<name>.worker.ts', import.meta.url), { type: 'module' })` shape, and any
+// other shape (or `worker.format` left at the default) makes it inline the worker as a `data:`
+// URL, which the CSP rejects and which would ship ORT inside the page bundle.
+//
+// Two chunks, not one: the decoder and the encoder are separate workers on purpose (the bar must
+// not wait for the move), and a build that merged them would serialise the two ORT sessions.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -24,20 +27,30 @@ beforeAll(() => {
   files = readdirSync(chunks);
 }, 300_000);
 
-describe('decoder worker chunk', () => {
-  it('is emitted as its own JavaScript chunk', () => {
-    const worker = files.filter((file) => /^decoder\.worker-.*\.js$/.test(file));
-    expect(worker).toHaveLength(1);
-    expect(readFileSync(resolve(chunks, worker[0]), 'utf8')).toContain('wasmPaths');
+const WORKERS = ['decoder', 'encoder'] as const;
+
+function chunkOf(name: string): string {
+  const found = files.filter((file) => file.startsWith(`${name}.worker-`) && file.endsWith('.js'));
+  expect(found, `${name}.worker chunk`).toHaveLength(1);
+  return found[0];
+}
+
+describe('worker chunks', () => {
+  it('emits one JavaScript chunk per worker, each with its own ORT setup', () => {
+    const emitted = WORKERS.map(chunkOf);
+    for (const worker of emitted) {
+      expect(readFileSync(resolve(chunks, worker), 'utf8')).toContain('wasmPaths');
+    }
+    expect(new Set(emitted).size).toBe(WORKERS.length);
   });
 
   it('is referenced by URL from the island bundle, never inlined as data:', () => {
-    const worker = files.find((file) => /^decoder\.worker-.*\.js$/.test(file));
+    const worker = chunkOf('decoder');
     const referencing = files.filter(
       (file) =>
         file.endsWith('.js') &&
         file !== worker &&
-        readFileSync(resolve(chunks, file), 'utf8').includes(worker!),
+        readFileSync(resolve(chunks, file), 'utf8').includes(worker),
     );
     expect(referencing.length).toBeGreaterThan(0);
 
@@ -47,6 +60,17 @@ describe('decoder worker chunk', () => {
       expect(code).not.toContain('data:text/javascript');
       expect(code).not.toContain('data:application/javascript');
     }
+  });
+
+  it('references the encoder worker by URL too', () => {
+    const worker = chunkOf('encoder');
+    const referencing = files.filter(
+      (file) =>
+        file.endsWith('.js') &&
+        file !== worker &&
+        readFileSync(resolve(chunks, file), 'utf8').includes(worker),
+    );
+    expect(referencing.length).toBeGreaterThan(0);
   });
 
   it('does not ship a second copy of the ONNX Runtime binary', () => {
