@@ -73,10 +73,20 @@ describe('stage registry', () => {
     expect(selectableStages('test')).toEqual([...STAGES, TEST_STAGE]);
   });
 
-  it('defaults to int8 on mobile or with data saver on', () => {
+  it('serves fp16 wherever WebGPU runs, phone or not', () => {
     expect(defaultStageId({})).toBe('small-fp16');
-    expect(defaultStageId({ mobile: true })).toBe('small-int8');
+    expect(defaultStageId({ webgpu: true })).toBe('small-fp16');
+    // The regression that matters: a phone with WebGPU used to be downgraded to int8, which
+    // changes the move in 4.6 % of positions and is not the model the cards describe.
+    expect(defaultStageId({ mobile: true, webgpu: true })).toBe('small-fp16');
+  });
+
+  it('falls back to int8 only without WebGPU or with data saver on', () => {
+    expect(defaultStageId({ webgpu: false })).toBe('small-int8');
+    expect(defaultStageId({ mobile: true, webgpu: false })).toBe('small-int8');
     expect(defaultStageId({ saveData: true })).toBe('small-int8');
+    // Data saver wins over a working WebGPU: it is the user asking for fewer bytes.
+    expect(defaultStageId({ saveData: true, webgpu: true })).toBe('small-int8');
   });
 
   it('answers undefined for an unknown stage', () => {
