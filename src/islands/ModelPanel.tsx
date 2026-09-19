@@ -16,6 +16,7 @@ import {
   type Backend,
   type ProgressMessage,
 } from '../lib/worker-protocol';
+import type { Stage } from '../lib/registry';
 import type { ClearCacheResult, EncoderStatus, ModelStatus } from './App';
 
 interface Props {
@@ -41,6 +42,8 @@ interface Props {
   encoderBackend: Signal<Backend | null>;
   encoderError: Signal<string | null>;
   onEncoder: () => void;
+  /** Releases the encoder session and goes back to its consent step. */
+  onEncoderOff: () => void;
 }
 
 /** What the "Borrar modelos descargados" button says, once it has been pressed. */
@@ -71,6 +74,19 @@ function statusText(game: GameState, human: Color, busy: boolean): string {
   return game.turn === human ? 'Te toca mover' : 'Turno del modelo';
 }
 
+/**
+ * The line that adds the two downloads up **before** the second one is accepted. The player is
+ * being asked for the bar's MB while the model's are either already spent or about to be, and a
+ * consent step that only names its own half of the bill is not a consent step. `null` when there
+ * is no decoder to add (mock mode, or a failed load): there is nothing to total.
+ */
+function combinedSize(phase: ModelStatus, model: Stage, encoder: Stage): string | null {
+  if (phase === 'mock' || phase === 'error' || model.sizeMb <= 0) return null;
+  const total = totalSizeMb(model, encoder);
+  const spent = phase === 'ready' ? 'ya descargados' : 'pendientes';
+  return `En total: ${total} MB (modelo ${model.sizeMb} MB ${spent} + barra ${encoder.sizeMb} MB).`;
+}
+
 /** `navigator.connection.saveData`, when the browser exposes it. */
 function saveData(): boolean {
   if (typeof navigator === 'undefined') return false;
@@ -99,6 +115,7 @@ export default function ModelPanel({
   encoderBackend,
   encoderError,
   onEncoder,
+  onEncoderOff,
 }: Props) {
   const state = game.value;
   const color = human.value;
@@ -109,6 +126,7 @@ export default function ModelPanel({
   const encoder = findEncoderStage(encoderStage.value) ?? ENCODER_STAGES[0];
   const encoderPhase = encoderStatus.value;
   const encoderDownload = encoderProgress.value;
+  const combined = combinedSize(phase, current, encoder);
   const [cache, setCache] = useState<CacheState>('idle');
 
   // The answer is temporary: without this the button would keep claiming "Modelos borrados"
@@ -237,6 +255,11 @@ export default function ModelPanel({
               {encoder.sizeMb} MB, licencia {MODEL_LICENSE}. Dibuja el valor de la posición y avisa
               de posibles errores.
             </p>
+            {combined ? (
+              <p class="consent__text caption" data-testid="encoder-consent-total">
+                {combined}
+              </p>
+            ) : null}
             {saveData() ? (
               <p class="consent__warn caption" data-testid="encoder-save-data">
                 Tienes el ahorro de datos activado: esta segunda descarga consume {encoder.sizeMb}{' '}
@@ -280,10 +303,18 @@ export default function ModelPanel({
                 + barra {encoder.sizeMb} MB).
               </p>
             ) : null}
+            {/* The bar can be given back: this releases the session and terminates its worker.
+                The weights stay in the cache, so turning it on again costs no download. */}
+            <button type="button" class="btn" data-testid="encoder-off" onClick={onEncoderOff}>
+              Apagar la barra
+            </button>
           </>
         ) : null}
 
-        {encoderPhase === 'error' ? (
+        {/* Driven by the message, not by the phase: a single `evaluate` that throws leaves the
+            session perfectly usable, so it is reported here without knocking the encoder out of
+            `ready` (see `evaluatePosition` in App.tsx). */}
+        {encoderPhase === 'error' || encoderError.value ? (
           <p class="model__error caption" role="alert" data-testid="encoder-error">
             {encoderError.value ?? 'No se ha podido cargar el encoder'}
           </p>

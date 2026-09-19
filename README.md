@@ -34,18 +34,18 @@ it is legal.
 
 ## Scripts
 
-| Script                              | What it does                                                                               |
-| ----------------------------------- | ------------------------------------------------------------------------------------------ |
-| `pnpm dev` / `pnpm build`           | Dev server / static build (`prebuild` copies sprites and ORT, `postbuild` verifies them)   |
-| `pnpm preview`                      | Serves `dist/`                                                                             |
-| `pnpm check` / `pnpm lint`          | `astro check` (TypeScript) / ESLint                                                        |
-| `pnpm format` / `pnpm format:check` | Prettier                                                                                   |
-| `pnpm test`                         | Vitest unit tests (`tests/`)                                                               |
-| `pnpm e2e`                          | Playwright: mobile 390x844, tablet 820x1180, desktop 1280x800, plus `isolated` (COOP/COEP) |
-| `pnpm lighthouse`                   | Lighthouse CI, mobile then desktop, >= 0.95 in the four categories                         |
-| `pnpm sync:tokens [--from <src>]`   | Copies `tokens.css` from `../rukh-lab` (or a URL) and updates lock                         |
-| `pnpm tokens:hash [--write]`        | Prints (or stores) the sha256 of `src/styles/tokens.css`                                   |
-| `pnpm sync:tokenizer [--from <u>]`  | Copies the tokenizer artifacts from `../rukh` (or a base URL)                              |
+| Script                              | What it does                                                                                 |
+| ----------------------------------- | -------------------------------------------------------------------------------------------- |
+| `pnpm dev` / `pnpm build`           | Dev server / static build (`prebuild` copies sprites and ORT, `postbuild` verifies them)     |
+| `pnpm preview`                      | Serves `dist/`                                                                               |
+| `pnpm check` / `pnpm lint`          | `astro check` (TypeScript) / ESLint                                                          |
+| `pnpm format` / `pnpm format:check` | Prettier                                                                                     |
+| `pnpm test`                         | Vitest unit tests (`tests/`)                                                                 |
+| `pnpm e2e`                          | Playwright: mobile 390x844, tablet 820x1180, desktop 1280x800, plus `isolated` (COOP/COEP)   |
+| `pnpm lighthouse`                   | Lighthouse CI, mobile then desktop, >= 0.95 in the four categories                           |
+| `pnpm sync:tokens [--from <src>]`   | Copies `tokens.css` from `../rukh-lab` (or a URL) and updates lock                           |
+| `pnpm tokens:hash [--write]`        | Prints (or stores) the sha256 of `src/styles/tokens.css`                                     |
+| `pnpm sync:tokenizer [--from <u>]`  | Copies the tokenizer artifacts from `../rukh` (or a base URL) and regenerates `squares.json` |
 
 Run `pnpm exec playwright install chromium` once before `pnpm e2e`.
 
@@ -213,19 +213,49 @@ is generated from the Python module itself (its vocabulary, its hash and the ids
 44 positions, from the starting position to promotions, all four castling rights, en passant and
 a 137-halfmove endgame) and `tests/squares.test.ts` replays every one of them.
 
+`pnpm sync:tokenizer` is what generates it. The 44 positions live in `scripts/sync-tokenizer.mjs`
+(they are the fixture's contract, not its output), the ids come from the Python module run in the
+ML repo's own virtualenv — `uv run --project ../rukh --no-sync`, with `PYTHONDONTWRITEBYTECODE`
+set, so nothing at all is written inside `../rukh` — and the answer is verified against
+`squares.ts` before it is written: same vocabulary token for token, same `vocab_hash`, same ids
+for all 44 positions. So a drift between the two implementations stops the sync instead of
+landing in `src/`. Unlike the three tokenizer artifacts this one is never downloaded (it is not
+an export, it is what that module answers); `--no-squares` skips the step on a machine with no
+`../rukh` checkout.
+
 ### The bar and the alert
 
 `src/islands/EvalBar.tsx` draws the fill from the value (White grows from the bottom when it is
 vertical, from the left when it is horizontal), with a 140 ms transition that the global
 `prefers-reduced-motion` rule turns off. The number is always printed with its sign and the track
-carries a label in words (`+0.42 · ventaja de las blancas`), so nothing about the bar depends on
-telling two colours apart. When `blunder` crosses 0.5 a discreet line appears under the board
-naming the move it is about (`Posible error en Rb8 · 79 % según el encoder`): the head answers
-about the move that led to this position, and an alert that does not name it is an accusation
-with no defendant. In the starting position there is no move to name and no alert.
+carries a label in words (`+0.42 · ventaja de las blancas tras dxc6`), so nothing about the bar
+depends on telling two colours apart. That label is read once, when the track is walked, so the
+value also travels through a visually hidden `aria-live` region beside it: otherwise the bar
+would change on every move and never say so. When `blunder` crosses 0.5 a discreet line appears
+under the board naming the move it is about (`Posible error en dxc6 · 74 % según el encoder`):
+the head answers about the move that led to this position, and an alert that does not name it is
+an accusation with no defendant. That line is always in the DOM once the bar is up and is empty
+when there is nothing to say — a live region created together with its text is routinely never
+announced.
 
-Every position the board settles on is evaluated, and an answer about a position that is no
-longer on the board is dropped instead of drawn.
+**The bar follows the player's move, not the board.** Every position the board settles on is
+evaluated, but which answer is drawn is decided by `supersedes`: an evaluation of a position the
+player created stays up until the player creates a newer one, and a position the opponent created
+only ever replaces another one of its kind (the opening position, or the opponent's first move
+when the human plays black). The reason is that playing a move hands the turn over within
+milliseconds, so the newest answer is always about the opponent's reply — a bar that simply drew
+the newest one could structurally only ever accuse the opponent, and the player would never be
+told about their own blunder, which is the one thing a learning demo is for. Answers from a game
+that no longer exists (new game, undo, colour or stage change) are dropped by generation.
+
+A failed `evaluate` is a failed run, not a failed session: the bar is emptied and the reason is
+shown in the panel, but the encoder stays `ready` and the next position simply tries again.
+
+The bar can also be given back. `Apagar la barra`, next to the backend badge, releases the ORT
+session and terminates its worker, and the panel returns to the encoder's consent step; without
+it the encoder was load-once for the life of the page. The weights stay in the Cache API, so
+turning it on again costs no download — emptying that cache is what `Borrar modelos descargados`
+is for.
 
 ### The toy encoder
 
@@ -237,10 +267,22 @@ same number for every position (value around -0.97, blunder around 0.01), so the
 move and the alert could never cross 0.5. The `value` head keeps its random direction, centred
 and scaled to span (-1, 1); the `blunder` head is pointed along the first principal component of
 the pooled representations and centred on the median, so the probability lands on both sides of
-0.5 over a game. Nothing else is touched: the graph, the two outputs, the sigmoid inside them and
-the metadata are the real ones. Regenerate it with `export_encoder_onnx` on a tiny
-`EncoderConfig(input='squares', n_layer=1, n_head=2, d_model=8, d_ff=16)` and check that it still
-weighs under 200 KB.
+0.5 over a game.
+
+Both heads are then centred one last time, on the **boundary the E2E suite asserts**: the
+bias of each is shifted to the mid-point between the position before the capture on move 4 of
+`e2e/encoder.spec.ts` (1.e4 2.d4 3.d5 4.dxc6) and the position after it. Along that one game the
+value therefore changes sign exactly on the capture (+0.26 to -0.26) and the blunder probability
+crosses 0.5 exactly on it (0.26 to 0.74), with a wide margin on either side instead of the 1e-6
+one the random initialisation happened to leave. A sign change is what the bar exists to show —
+a magnitude jump says nothing about who is winning — so that is what the suite asserts, and the
+toy is calibrated to make the assertion meaningful rather than lucky.
+
+Nothing else is touched: the graph, the two outputs, the sigmoid inside them and the metadata are
+the real ones, and only `model.value.proj.bias` and `model.blunder.proj.bias` differ from the
+exported file. Regenerate it with `export_encoder_onnx` on a tiny
+`EncoderConfig(input='squares', n_layer=1, n_head=2, d_model=8, d_ff=16)`, re-centre the two
+biases on that boundary, and check that it still weighs under 200 KB.
 
 ## Mock mode
 
@@ -287,7 +329,9 @@ are not applied: the trained model has none, and `bpe_ids` in the fixture are th
 `../rukh/artifacts/tokenizer` into `src/lib/chess-lm/` (validating each one: 2030 tokens in the
 vocabulary, `model.vocab` plus `model.merges` in the BPE and 20 complete games in the fixture);
 `--from <baseUrl>` downloads them instead (the default base is
-`https://huggingface.co/chorcat/rukh-tokenizer/resolve/main`).
+`https://huggingface.co/chorcat/rukh-tokenizer/resolve/main`). The same command regenerates
+`fixtures/squares.json` from the Python module, which is a different kind of step — see
+[The 69 tokens](#the-69-tokens).
 
 ### Parity with Python
 

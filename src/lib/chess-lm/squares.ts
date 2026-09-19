@@ -97,6 +97,10 @@ function placementIds(placement: string): number[] {
     const rank = 7 - row; // the placement is written from rank 8 down to rank 1
     let file = 0;
     for (const char of ranks[row]) {
+      // Divergence from Python, on malformed input only: `str.isdigit()` there also says yes to
+      // '0' and to non-ASCII digits ('٣', '²'), where this says no and reports an unknown piece.
+      // Python then raises too ('0' leaves the rank short, `int('²')` throws), so no FEN is
+      // accepted on one side and refused on the other — only the message differs.
       if (char >= '1' && char <= '9') {
         file += Number(char);
       } else if (PIECES.includes(char)) {
@@ -141,6 +145,10 @@ export function fenToTokens(fen: string): number[] {
   if (turn !== 'w' && turn !== 'b') {
     throw new Error(`the side to move must be 'w' or 'b', got ${turn}`);
   }
+  // Second divergence from Python, again only where no real FEN goes. `Number()` is not `int()`:
+  // the `Number.isInteger` guard below keeps them in step on '1.5' (refused on both sides), but
+  // '1e2' and '0x10' are read here as 100 and 16 while `int()` raises on them. A FEN whose
+  // halfmove clock is written like that is malformed either way; it buckets instead of throwing.
   const halfmove = fields.length > 4 ? Number(fields[4]) : 0;
   if (!Number.isInteger(halfmove)) {
     throw new Error(`the halfmove clock must be an integer, got ${fields[4]}`);

@@ -93,16 +93,27 @@ describe('the model contract', () => {
   });
 });
 
-/** A session that reports the encoder's two outputs, with the shapes ORT would declare. */
+/**
+ * A session that reports the encoder's two outputs, with the shapes ORT would declare, and the
+ * single `idx (batch, 69)` input the exporter writes.
+ */
 function encoderSession(
   names: readonly string[] = ENCODER_OUTPUTS,
   shapes?: Record<string, readonly (number | string)[]>,
+  input: { names?: readonly string[]; shape?: readonly (number | string)[] } = {},
 ): SessionLike {
+  const inputNames = input.names ?? ['idx'];
   return {
     outputNames: names,
     outputMetadata: shapes
       ? names.map((name) => ({ name, isTensor: true, shape: shapes[name] }))
       : undefined,
+    inputNames,
+    inputMetadata: inputNames.map((name) => ({
+      name,
+      isTensor: true,
+      shape: input.shape ?? ['batch', ENCODER_BLOCK],
+    })),
   };
 }
 
@@ -161,6 +172,33 @@ describe("the encoder's contract", () => {
   it('refuses a length the squares scheme could not have produced', () => {
     expect(() => readEncoderContract(encoderSession(), 0)).toThrow(/encoder/);
     expect(() => readEncoderContract(encoderSession(), 1.5)).toThrow(/contexto/);
+  });
+
+  it('reads the input the file declares instead of trusting the registry', () => {
+    // One input, called whatever the exporter called it, taking exactly the tokens we send.
+    expect(readEncoderContract(encoderSession(), ENCODER_BLOCK).block).toBe(ENCODER_BLOCK);
+    // A symbolic length is not a disagreement: the registry's number stands.
+    expect(
+      readEncoderContract(encoderSession(ENCODER_OUTPUTS, undefined, { shape: ['b', 'seq'] }), 69)
+        .block,
+    ).toBe(69);
+    // A file that takes another number of tokens is not the encoder the bar tokenizes for.
+    expect(() =>
+      readEncoderContract(
+        encoderSession(ENCODER_OUTPUTS, undefined, { shape: ['batch', 200] }),
+        ENCODER_BLOCK,
+      ),
+    ).toThrow(/200 tokens/);
+    // `inputFeeds` hands one tensor to `inputNames[0]`: a second input would be left to guess.
+    expect(() =>
+      readEncoderContract(
+        encoderSession(ENCODER_OUTPUTS, undefined, { names: ['idx', 'mask'] }),
+        ENCODER_BLOCK,
+      ),
+    ).toThrow(/única entrada/);
+    expect(() =>
+      readEncoderContract(encoderSession(ENCODER_OUTPUTS, undefined, { names: [] }), ENCODER_BLOCK),
+    ).toThrow(/ninguna/);
   });
 
   it('checks that each head answered inside the range its activation can produce', () => {

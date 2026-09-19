@@ -36,7 +36,7 @@ import { fenToTokens, UciTokenizer } from '../lib/chess-lm';
 import { createDecoder, type Decoder } from '../workers/decoder-client';
 import { createEncoder, type Encoder } from '../workers/encoder-client';
 import Board from './Board';
-import EvalBar, { type Evaluation } from './EvalBar';
+import EvalBar, { supersedes, type Evaluation } from './EvalBar';
 import ModelPanel from './ModelPanel';
 import More from './More';
 import MoveList from './MoveList';
@@ -100,6 +100,20 @@ const encoderProgress = signal<ProgressMessage | null>(null);
 const encoderBackend = signal<Backend | null>(null);
 const encoderError = signal<string | null>(null);
 const evaluation = signal<Evaluation | null>(null);
+/**
+ * Bumped every time the game on the board is replaced (new game, undo, colour or stage change).
+ * An evaluation that was asked for under an older generation belongs to a game that no longer
+ * exists, so it is dropped: the bar deliberately survives the opponent's replies (see
+ * `supersedes`), which means the position it belongs to is usually *not* the one on the board and
+ * a `fen` comparison can no longer tell "stale" from "the move the player is being told about".
+ */
+let generation = 0;
+
+/** Forgets the current evaluation and refuses every answer already in flight. */
+function dropEvaluation(): void {
+  generation += 1;
+  evaluation.value = null;
+}
 
 const top5 = signal<TopEntry[]>([]);
 const waterfall = signal<Timings[]>([]);
@@ -206,7 +220,7 @@ function startNewGame() {
   top5.value = [];
   illegal.value = null;
   // The bar belongs to a position that no longer exists; the effect below refills it.
-  evaluation.value = null;
+  dropEvaluation();
   void settle();
 }
 
@@ -220,7 +234,7 @@ function undo() {
   if (busy.value || !canUndo(game.value, human.value)) return;
   game.value = undoPair(game.value, human.value);
   illegal.value = null;
-  evaluation.value = null;
+  dropEvaluation();
   // As black, undo leaves the opponent to move: let it reply.
   void settle();
 }
@@ -290,22 +304,53 @@ async function loadEncoder() {
 }
 
 /**
- * Evaluates the position on the board. The worker serialises its own runs, so a burst of moves
- * only queues; what matters here is that an answer about a position that is no longer on the
- * board is dropped instead of drawn.
+ * Turns the bar off again: releases the ORT session, terminates the worker and goes back to the
+ * consent step. Without this the encoder is load-once for the life of the page — a second worker,
+ * a second session and 30 MB of weights that a player who only wanted to look at the bar once has
+ * no way of giving back. The weights stay in the Cache API (that is what "Borrar modelos
+ * descargados" is for), so turning it on again costs no download.
+ */
+async function stopEncoder() {
+  const live = encoder;
+  encoder = null;
+  encoderStatus.value = 'consent';
+  encoderProgress.value = null;
+  encoderBackend.value = null;
+  encoderError.value = null;
+  dropEvaluation();
+  await live?.dispose();
+}
+
+/**
+ * Evaluates a position the board settled on. The worker serialises its own runs, so a burst of
+ * moves only queues; what is decided here is *which* answer the bar ends up drawing, and that is
+ * not simply the newest one — `supersedes` explains why the player's own move wins over the reply
+ * that follows it milliseconds later.
+ *
+ * A failed `evaluate` is a failed **run**, not a failed session: the bar is emptied (a frozen
+ * number about a position nobody is looking at any more is worse than no number) and the reason
+ * is shown in the panel, but the session stays `ready`, so the next position simply tries again.
  */
 async function evaluatePosition(state: GameState) {
   const source = encoder;
   if (!source || encoderStatus.value !== 'ready') return;
+  const asked = generation;
   const fen = state.fen;
-  const move = state.history.length > 0 ? state.history[state.history.length - 1] : null;
+  const ply = state.history.length;
+  const move = ply > 0 ? state.history[ply - 1] : null;
+  // The side that has just moved is the one that is *not* to move now.
+  const byHuman = ply > 0 && state.turn !== human.value;
   try {
     const answer = await source.evaluate(fenToTokens(fen));
-    if (game.value.fen !== fen) return;
-    evaluation.value = { value: answer.value, blunder: answer.blunder, move };
+    if (asked !== generation) return;
+    const next: Evaluation = { value: answer.value, blunder: answer.blunder, move, ply, byHuman };
+    if (!supersedes(next, evaluation.value)) return;
+    encoderError.value = null;
+    evaluation.value = next;
   } catch (cause) {
+    if (asked !== generation) return;
     encoderError.value = cause instanceof Error ? cause.message : String(cause);
-    encoderStatus.value = 'error';
+    evaluation.value = null;
   }
 }
 
@@ -385,7 +430,14 @@ export default function App() {
 
   return (
     <>
-      <div class="board-area" data-testid="board-area" data-eval={evaluation.value ? 'on' : 'off'}>
+      {/* The bar's column is reserved as soon as the encoder is ready, never per evaluation:
+          `evaluation` is emptied by every new game and every undo, and driving the layout from it
+          made the board jump by the width of that column each time. */}
+      <div
+        class="board-area"
+        data-testid="board-area"
+        data-eval={encoderStatus.value === 'ready' ? 'on' : 'off'}
+      >
         <Board
           game={game}
           human={human}
@@ -419,6 +471,7 @@ export default function App() {
           encoderBackend={encoderBackend}
           encoderError={encoderError}
           onEncoder={() => void loadEncoder()}
+          onEncoderOff={() => void stopEncoder()}
         />
         <MoveList
           game={game}

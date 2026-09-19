@@ -2,6 +2,7 @@
 // src/lib/chess-lm/fixtures/ is generated from that module itself (its vocabulary, its hash and
 // the ids it answers for 44 positions), so a drift between the two files fails here instead of
 // showing a quietly wrong evaluation bar in the browser.
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -44,6 +45,14 @@ describe('the squares scheme', () => {
 
   it('builds the vocabulary Python built, token for token', () => {
     expect(SQUARE_VOCAB).toEqual(fixture.vocab);
+  });
+
+  it('answers the identity Python pins the scheme with', () => {
+    // `squares.vocab_hash()`: sha256 of the vocabulary as a compact JSON list, which is exactly
+    // what `JSON.stringify` writes. A change to the enumeration invalidates every encoder trained
+    // with it, so the hash is asserted here and not merely carried in the fixture.
+    const hash = createHash('sha256').update(JSON.stringify(SQUARE_VOCAB), 'ascii').digest('hex');
+    expect(hash).toBe(fixture.vocab_hash);
   });
 
   it('lists the 16 castling combinations in the Python order', () => {

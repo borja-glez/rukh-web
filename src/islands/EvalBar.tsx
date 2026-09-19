@@ -1,6 +1,6 @@
 import type { Signal } from '@preact/signals';
 
-/** What the encoder answered for the position currently on the board. */
+/** What the encoder answered for the position the bar is drawing. */
 export interface Evaluation {
   /** `tanh(cp / 400)` from White's point of view, in [-1, 1]. */
   value: number;
@@ -8,6 +8,29 @@ export interface Evaluation {
   blunder: number;
   /** SAN of that move, or null in the starting position. The alert has to be able to name it. */
   move: string | null;
+  /** Half-moves played to reach the position; how two evaluations are ordered. */
+  ply: number;
+  /** True when `move` was the player's own, false when it was the opponent's (or there is none). */
+  byHuman: boolean;
+}
+
+/**
+ * Whether `next` should replace `current` on the bar.
+ *
+ * The rule is deliberately **not** "the newest answer wins". Playing a move hands the turn to the
+ * opponent within milliseconds, so the newest answer is always about the opponent's reply, and a
+ * bar that always drew the newest one could structurally only ever accuse the opponent: the
+ * player would never be told about their own blunder, which is the one thing a learning demo is
+ * for. So an evaluation of a position the player created stays up until the player creates a
+ * newer one, and a position the *opponent* created only ever replaces another one of its kind —
+ * the opening position, or the opponent's first move when the human plays black.
+ *
+ * Positions from an older game never arrive here: `App` drops them by generation before asking.
+ */
+export function supersedes(next: Evaluation, current: Evaluation | null): boolean {
+  if (!current) return true;
+  if (next.ply < current.ply) return false;
+  return next.byHuman || !current.byHuman;
 }
 
 interface Props {
@@ -51,7 +74,8 @@ export function advantage(value: number): string {
  *     apart (and for anyone on a screen reader);
  *   * the alert **names the move it refers to**: the blunder head answers about the move that led
  *     to this position, not about the position, and an alert that does not say which move is an
- *     accusation with no defendant. Without a move played there is nothing to name and no alert;
+ *     accusation with no defendant. Without a move played there is nothing to name and no alert.
+ *     Which move that is follows `supersedes` above: normally the player's own last move;
  *   * the fill is animated with a 140 ms transition, and `prefers-reduced-motion: reduce` turns
  *     every transition off globally in `base.css`.
  *
@@ -64,6 +88,7 @@ export default function EvalBar({ evaluation }: Props) {
   if (!current) return null;
   const alert = current.blunder > BLUNDER_THRESHOLD && current.move !== null;
   const reading = `${formatValue(current.value)} · ${advantage(current.value)}`;
+  const about = current.move ? ` tras ${current.move}` : '';
 
   return (
     <>
@@ -76,7 +101,7 @@ export default function EvalBar({ evaluation }: Props) {
         <div
           class="evalbar__track"
           role="img"
-          aria-label={`Evaluación del encoder: ${reading}`}
+          aria-label={`Evaluación del encoder: ${reading}${about}`}
           data-testid="eval-track"
         >
           <div class="evalbar__fill" style={{ '--eval-fill': whiteShare(current.value) }} />
@@ -85,12 +110,28 @@ export default function EvalBar({ evaluation }: Props) {
           {formatValue(current.value)}
         </p>
       </section>
-      {alert ? (
-        <p class="evalbar__alert" role="status" data-testid="blunder-alert">
-          <span class="evalbar__alert-tag">Posible error</span> en {current.move} ·{' '}
-          {Math.round(current.blunder * 100)} % según el encoder
-        </p>
-      ) : null}
+      {/* The `role="img"` label above is read once, when the bar is focused or walked: nothing
+          re-announces it when the number changes. This is the announcement path for the value —
+          the same pattern the move list uses for the last move played. */}
+      <p class="visually-hidden" aria-live="polite" data-testid="eval-announce">
+        {`Evaluación ${reading}${about}`}
+      </p>
+      {/* Always in the DOM, empty when there is nothing to say: a live region has to pre-exist
+          the text it announces, and one that is created together with its content is routinely
+          missed. `.evalbar__alert:empty` collapses the frame so an empty one draws nothing. */}
+      <p
+        class="evalbar__alert"
+        role="status"
+        data-testid="blunder-alert"
+        data-alert={alert ? 'true' : 'false'}
+      >
+        {alert ? (
+          <>
+            <span class="evalbar__alert-tag">Posible error</span> en {current.move} ·{' '}
+            {Math.round(current.blunder * 100)} % según el encoder
+          </>
+        ) : null}
+      </p>
     </>
   );
 }

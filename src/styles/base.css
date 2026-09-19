@@ -528,6 +528,13 @@ select {
   font-size: 13px;
 }
 
+/* The alert is a live region and is always in the DOM once the bar is up, so that a screen
+   reader has something to announce into; with no alert to make it is empty and draws nothing. */
+.evalbar__alert:empty {
+  padding: 0;
+  border: 0;
+}
+
 .evalbar__alert-tag {
   font-weight: 600;
   text-transform: uppercase;

@@ -24,7 +24,7 @@ export interface ModelContract {
   vocab: number;
 }
 
-/** The part of ORT's `InferenceSession.ValueMetadata` this check needs. */
+/** The part of ORT's `InferenceSession.ValueMetadata` this check needs; inputs and outputs. */
 export interface OutputMetadata {
   name: string;
   isTensor?: boolean;
@@ -36,6 +36,9 @@ export interface OutputMetadata {
 export interface SessionLike {
   readonly outputNames: readonly string[];
   readonly outputMetadata?: readonly OutputMetadata[];
+  /** ORT always reports these; optional here because the decoder's check never looks at them. */
+  readonly inputNames?: readonly string[];
+  readonly inputMetadata?: readonly OutputMetadata[];
 }
 
 /** Smallest context that can still hold the three header tokens plus one move. */
@@ -58,8 +61,19 @@ export function declaredVocab(session: SessionLike): number | null {
  * decoder's single one, so the lookup lives here and both go through it.
  */
 export function declaredLastDim(session: SessionLike, name: string): number | null {
-  const meta = session.outputMetadata?.find((entry) => entry.name === name);
-  const shape = meta?.shape;
+  return lastFixedDim(session.outputMetadata, name);
+}
+
+/**
+ * The fixed last dimension one named value declares in a metadata list, or `null` when it is
+ * symbolic, absent or nonsense. Inputs and outputs are read the same way, which is the whole
+ * reason this is not spelled twice.
+ */
+export function lastFixedDim(
+  metadata: readonly OutputMetadata[] | undefined,
+  name: string,
+): number | null {
+  const shape = metadata?.find((entry) => entry.name === name)?.shape;
   if (!shape || shape.length === 0) return null;
   const last = shape[shape.length - 1];
   return typeof last === 'number' && Number.isInteger(last) && last > 0 ? last : null;
@@ -127,8 +141,17 @@ export const VALUE_RANGE = [-1, 1] as const;
 export const BLUNDER_RANGE = [0, 1] as const;
 
 /**
- * The contract of a freshly created encoder session: the two outputs by name, their declared
- * width when ORT gives a fixed one, and the `block` the registry declares for the stage.
+ * The contract of a freshly created encoder session: its single input and how many tokens that
+ * input takes, the two outputs by name, their declared width when ORT gives a fixed one, and the
+ * `block` the registry declares for the stage.
+ *
+ * The input side matters as much as the output side. `inputFeeds` builds one tensor and hands it
+ * to `inputNames[0]`, so a graph with two inputs would be fed one and left to guess the other;
+ * and `squares` is not a context window that can be cropped but a fixed layout of 69 slots, so a
+ * file that declares another length is not the encoder this bar tokenizes for — the registry's
+ * number is what we *asked* for, the file says what it *takes*. The exporter writes the length
+ * as a fixed axis (`rukh_dynamic_seq=False`), so it is usually there to be read; when it is
+ * symbolic the registry's number stands and the worker still checks every sequence it sends.
  */
 export function readEncoderContract(session: SessionLike, block: number): EncoderContract {
   if (!Number.isInteger(block) || block < MIN_BLOCK) {
@@ -145,6 +168,22 @@ export function readEncoderContract(session: SessionLike, block: number): Encode
   for (const name of ENCODER_OUTPUTS) {
     const declared = declaredLastDim(session, name);
     if (declared !== null) assertScalarOutput(declared, name, DECLARED_SOURCE);
+  }
+  const inputs = session.inputNames;
+  if (!inputs || inputs.length !== 1) {
+    throw new Error(
+      `Este fichero no es el encoder de la barra: se esperaba una única entrada y trae ` +
+        `${inputs?.length ?? 0} (${inputs?.join(', ') || 'ninguna'}). Borra los modelos ` +
+        `descargados y vuelve a intentarlo.`,
+    );
+  }
+  const tokens = lastFixedDim(session.inputMetadata, inputs[0]);
+  if (tokens !== null && tokens !== block) {
+    throw new Error(
+      `La entrada ${inputs[0]} del encoder toma ${tokens} tokens y la barra le da ${block}: el ` +
+        `fichero no es el que espera la barra. Borra los modelos descargados y vuelve a ` +
+        `intentarlo.`,
+    );
   }
   return { block, outputs: [VALUE_OUTPUT, BLUNDER_OUTPUT] };
 }

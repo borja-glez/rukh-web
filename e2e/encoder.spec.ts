@@ -12,10 +12,16 @@ import { square, tapMove, waitIdle, type Uci } from './helpers';
  * has nothing to do with who chooses the moves, so the opponent here is the deterministic "first
  * legal move" one and every position below is known in advance.
  *
- * The toy's weights are random, so the numbers are arbitrary — what is asserted is that they
- * move, that they stay inside the range the heads can produce, and that the alert crosses 0.5
- * where the calibration of the fixture says it does (after the capture on move 4; see the
- * generator's docstring in `README.md`).
+ * The toy's weights are random, so the numbers themselves are arbitrary; what its two heads are
+ * calibrated for is the boundary this file asserts (see `README.md`). Both are centred between
+ * the position before the capture on move 4 and the position after it, so along this one game the
+ * value changes **sign** on the capture and the blunder probability crosses 0.5 on it and nowhere
+ * else. Everything else — the range, the movement, the wording — holds for any weights at all.
+ *
+ * The bar follows the player's own move, not the position on the board: the opponent answers in
+ * milliseconds and a bar that always drew the newest answer could only ever accuse the opponent
+ * (`supersedes` in `src/islands/EvalBar.tsx`). So every reading below belongs to the position
+ * right after the human moved, and the alert names the human's move.
  */
 const PAGE = '/?mock=1&encoder=test';
 const LOAD_TIMEOUT = 120_000;
@@ -30,6 +36,9 @@ const HUMAN: Uci[] = [
 
 /** The opponent's reply after each of those, in the same order. */
 const REPLIES = ['Nc6', 'Rb8', 'Ra8', 'Rb8'];
+
+/** The move the bar is about after each human move: the human's own, never the reply. */
+const ABOUT = HUMAN.map((move) => move.san);
 
 /** URLs of everything the encoder path could pull: the weights and the ORT runtime. */
 function encoderRequests(page: Page): string[] {
@@ -54,10 +63,15 @@ async function turnBarOn(page: Page): Promise<void> {
   await expect(page.getByTestId('evalbar')).toBeVisible({ timeout: LOAD_TIMEOUT });
 }
 
-/** The number the bar prints right now. */
+/**
+ * The value the bar is drawing right now, read from `data-raw` (4 decimals) rather than from the
+ * printed text: the text is rounded to 2 decimals, so two different evaluations can print the
+ * same string and a test that compares readings would call that "the bar did not move".
+ */
 async function reading(page: Page): Promise<number> {
-  const text = await page.getByTestId('eval-value').textContent();
-  return Number(text);
+  const raw = await page.getByTestId('eval-value').getAttribute('data-raw');
+  if (raw === null) throw new Error('the bar is not drawing a value');
+  return Number(raw);
 }
 
 /** Plays the `index`-th human move and waits for the opponent's known reply. */
@@ -65,6 +79,20 @@ async function playMove(page: Page, index: number, touch: boolean): Promise<void
   await tapMove(page, HUMAN[index], touch);
   await expect(page.locator(`[data-ply="${2 * index + 2}"]`)).toHaveText(REPLIES[index]);
   await waitIdle(page);
+}
+
+/**
+ * Plays a move and waits for the encoder to answer about it. Waiting only for the reply in the
+ * move list is a race: the board is idle long before the evaluation comes back, so an assertion
+ * made there passes against the *previous* position and would keep passing if the bar never
+ * updated again. The bar names the move it is about, so that is what is waited for.
+ */
+async function playAndEvaluate(page: Page, index: number, touch: boolean): Promise<number> {
+  await playMove(page, index, touch);
+  await expect(page.getByTestId('eval-announce')).toContainText(`tras ${ABOUT[index]}`, {
+    timeout: LOAD_TIMEOUT,
+  });
+  return reading(page);
 }
 
 test.describe('the encoder evaluation bar', () => {
@@ -120,12 +148,7 @@ test.describe('the encoder evaluation bar', () => {
 
     const readings = [await reading(page)];
     for (let move = 0; move < HUMAN.length; move += 1) {
-      await playMove(page, move, hasTouch);
-      // The bar belongs to the position on the board: wait for it to stop being the old one.
-      await expect
-        .poll(async () => reading(page), { timeout: LOAD_TIMEOUT })
-        .not.toBe(readings[readings.length - 1]);
-      readings.push(await reading(page));
+      readings.push(await playAndEvaluate(page, move, hasTouch));
     }
 
     // With random weights the numbers are arbitrary, so what is asserted is that the bar moves
@@ -135,8 +158,17 @@ test.describe('the encoder evaluation bar', () => {
       expect(value).toBeGreaterThanOrEqual(-1);
       expect(value).toBeLessThanOrEqual(1);
     }
-    // The capture (4.dxc6) is the move the fixture was calibrated to move the bar on.
-    expect(Math.abs(readings[4] - readings[3])).toBeGreaterThan(0.1);
+    // The capture (4.dxc6) is what the value head is calibrated on: it does not merely move the
+    // bar, it changes its **sign** — the advantage changes hands, which is the thing the bar
+    // exists to show. Asserting a magnitude instead would pass on a bar that swung from +0.3 to
+    // +0.9 and never said anything about who is winning.
+    expect(readings[3]).toBeGreaterThan(0);
+    expect(readings[4]).toBeLessThan(0);
+    await expect(page.getByTestId('eval-value')).toHaveText(/^-\d\.\d\d$/);
+    await expect(page.getByTestId('eval-track')).toHaveAttribute(
+      'aria-label',
+      /ventaja de las negras tras dxc6$/,
+    );
     await expect(page.getByTestId('encoder-error')).toHaveCount(0);
   });
 
@@ -147,29 +179,56 @@ test.describe('the encoder evaluation bar', () => {
     await open(page);
     await turnBarOn(page);
 
-    // Nothing to accuse in the starting position: there is no move to name.
-    await expect(page.getByTestId('blunder-alert')).toHaveCount(0);
+    // Nothing to accuse in the starting position: there is no move to name. The live region is
+    // there all the same — one created together with its text is routinely never announced.
+    const alert = page.getByTestId('blunder-alert');
+    await expect(alert).toHaveAttribute('data-alert', 'false');
+    await expect(alert).toHaveText('');
     await expect(page.getByTestId('evalbar')).toHaveAttribute('data-blunder', 'false');
 
+    // Each assertion is made only once the encoder has answered about the move just played.
     for (let move = 0; move < 3; move += 1) {
-      await playMove(page, move, hasTouch);
-      await expect(page.getByTestId('blunder-alert')).toHaveCount(0);
+      await playAndEvaluate(page, move, hasTouch);
+      await expect(alert).toHaveAttribute('data-alert', 'false');
+      await expect(alert).toHaveText('');
     }
 
-    await playMove(page, 3, hasTouch);
-    const alert = page.getByTestId('blunder-alert');
-    await expect(alert).toBeVisible({ timeout: LOAD_TIMEOUT });
-    // Readable without telling any colours apart: it says what it is and which move it is about.
+    await playAndEvaluate(page, 3, hasTouch);
+    await expect(alert).toHaveAttribute('data-alert', 'true');
+    // Readable without telling any colours apart: it says what it is and which move it is about,
+    // and the move it is about is the player's own capture, not the opponent's reply to it.
     await expect(alert).toContainText('Posible error');
-    await expect(alert).toContainText(REPLIES[3]);
+    await expect(alert).toContainText(ABOUT[3]);
+    await expect(alert).not.toContainText(REPLIES[3]);
     await expect(alert).toContainText('%');
     await expect(page.getByTestId('evalbar')).toHaveAttribute('data-blunder', 'true');
+  });
+
+  test('gives the bar back: the off switch releases the session and hides it', async ({ page }) => {
+    await open(page);
+    await turnBarOn(page);
+    await expect(page.getByTestId('evalbar')).toBeVisible();
+
+    await page.getByTestId('encoder-off').click();
+    await expect(page.getByTestId('evalbar')).toHaveCount(0);
+    await expect(page.getByTestId('blunder-alert')).toHaveCount(0);
+    await expect(page.getByTestId('encoder-consent')).toBeVisible();
+    await expect(page.getByTestId('board-area')).toHaveAttribute('data-eval', 'off');
+    await expect(page.getByTestId('encoder-error')).toHaveCount(0);
+
+    // And it can be turned on again; the weights are in the cache, so nothing is downloaded.
+    await turnBarOn(page);
+    expect(Number.isFinite(await reading(page))).toBe(true);
   });
 
   test('keeps the single screen: no horizontal scroll, board still square', async ({ page }) => {
     await open(page);
     const before = await page.getByTestId('board').boundingBox();
+    await expect(page.getByTestId('board-area')).toHaveAttribute('data-eval', 'off');
     await turnBarOn(page);
+    // The column belongs to the encoder being ready, not to there being an evaluation to draw:
+    // otherwise every new game and every undo took it away and the board jumped by its width.
+    await expect(page.getByTestId('board-area')).toHaveAttribute('data-eval', 'on');
 
     const overflow = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
@@ -223,8 +282,8 @@ test.describe('the encoder evaluation bar', () => {
   }) => {
     await open(page);
     await turnBarOn(page);
-    for (let move = 0; move < HUMAN.length; move += 1) await playMove(page, move, hasTouch);
-    await expect(page.getByTestId('blunder-alert')).toBeVisible({ timeout: LOAD_TIMEOUT });
+    for (let move = 0; move < HUMAN.length; move += 1) await playAndEvaluate(page, move, hasTouch);
+    await expect(page.getByTestId('blunder-alert')).toHaveAttribute('data-alert', 'true');
 
     const results = await new AxeBuilder({ page }).analyze();
     const blocking = results.violations.filter(
@@ -242,11 +301,19 @@ test.describe('the encoder evaluation bar', () => {
     await expect(page.locator('[data-testid="board"] .pieces-layer use').first()).toBeVisible();
     await waitIdle(page);
 
+    // The bar's consent adds the two downloads up *before* it is accepted: the decoder's MB are
+    // pending, and a consent step that only names its own half of the bill is not one.
     await expect(page.getByTestId('total-size')).toHaveCount(0);
+    const combined = page.getByTestId('encoder-consent-total');
+    await expect(combined).toContainText('0.3 MB');
+    await expect(combined).toContainText('pendientes');
+
     await page.getByTestId('play').click();
     await expect(page.getByTestId('backend')).toBeVisible({ timeout: LOAD_TIMEOUT });
-    // The model is loaded and the bar has still not been downloaded.
+    // The model is loaded and the bar has still not been downloaded; the total now says so.
     await expect(page.getByTestId('total-size')).toHaveCount(0);
+    await expect(combined).toContainText('0.3 MB');
+    await expect(combined).toContainText('ya descargados');
     await expect(page.getByTestId('evalbar')).toHaveCount(0);
 
     await turnBarOn(page);
