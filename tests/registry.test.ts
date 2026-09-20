@@ -38,6 +38,7 @@ describe('stage registry', () => {
       'medium-fp16',
       'medium-int8',
       'medium-dpo-fp16',
+      'medium-grpo-fp16',
       'medium-elo-fp16',
       'medium-elo-int8',
       'medium-lora-fp16',
