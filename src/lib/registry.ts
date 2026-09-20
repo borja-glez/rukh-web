@@ -227,15 +227,16 @@ export const STAGES: Stage[] = [
     block: DEFAULT_BLOCK,
     eloConditioned: true,
   },
-  // The same weights as `medium`, exported with the LoRA factors as inputs of the graph. It is
-  // a separate stage and not a replacement because the file is a separate download: somebody who
-  // already has `medium-fp16` cached should not lose it to a swap they may never use.
+  // The same weights as `medium`, exported with the LoRA factors as inputs of the graph, in a
+  // repository of its own. A separate stage and not a replacement because the file is a separate
+  // download: somebody who already has `medium-fp16` cached should not lose it to a feature they
+  // may never use, and fed an adapter of zeros this graph computes exactly what that one does.
   {
     id: 'medium-lora-fp16',
     label: 'Rukh medium + estilo (fp16)',
     kind: 'onnx',
-    repo: 'chorcat/rukh-medium',
-    file: 'onnx/model-lora-fp16.onnx',
+    repo: 'chorcat/rukh-medium-lora',
+    file: 'onnx/model-fp16.onnx',
     sizeMb: STAGE_SIZE_MB['medium-lora-fp16'],
     block: DEFAULT_BLOCK,
     adaptable: true,
@@ -244,8 +245,8 @@ export const STAGES: Stage[] = [
     id: 'medium-lora-int8',
     label: 'Rukh medium + estilo (int8)',
     kind: 'onnx',
-    repo: 'chorcat/rukh-medium',
-    file: 'onnx/model-lora-int8.onnx',
+    repo: 'chorcat/rukh-medium-lora',
+    file: 'onnx/model-int8.onnx',
     sizeMb: STAGE_SIZE_MB['medium-lora-int8'],
     block: DEFAULT_BLOCK,
     adaptable: true,
