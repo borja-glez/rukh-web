@@ -58,6 +58,7 @@ export const STAGE_SIZE_MB = {
   'medium-fp16': 231,
   'medium-int8': 122,
   'medium-dpo-fp16': 231,
+  'medium-grpo-fp16': 231,
   'medium-elo-fp16': 231,
   'medium-elo-int8': 122,
   // The swappable export is 438 KB bigger than the ordinary one -- the cost of a graph that takes
@@ -201,7 +202,10 @@ export const STAGES: Stage[] = [
     sizeMb: STAGE_SIZE_MB['medium-int8'],
     block: DEFAULT_BLOCK,
   },
-  // The strongest model the project has: `medium` after DPO on engine-scored move pairs.
+  // `medium` after DPO on preference pairs the model proposed itself. +57 Elo over the base in a
+  // head-to-head of 800 games (M5), and it beats the off-policy arm by +37 when the two play each
+  // other -- which is the only direct comparison between the two candidates, and the reason this
+  // is the one served.
   {
     id: 'medium-dpo-fp16',
     label: 'Rukh medium + DPO (fp16)',
@@ -209,6 +213,18 @@ export const STAGES: Stage[] = [
     repo: 'chorcat/rukh-medium-dpo',
     file: 'onnx/model-fp16.onnx',
     sizeMb: STAGE_SIZE_MB['medium-dpo-fp16'],
+    block: DEFAULT_BLOCK,
+  },
+  // `medium` after GRPO against a verifiable reward: +43 Elo over the base, and the aligned model
+  // that damages legality least -- 1.66 times its base's illegal-proposal rate against the 2.0-2.6
+  // of the two DPO arms.
+  {
+    id: 'medium-grpo-fp16',
+    label: 'Rukh medium + GRPO (fp16)',
+    kind: 'onnx',
+    repo: 'chorcat/rukh-medium-grpo',
+    file: 'onnx/model-fp16.onnx',
+    sizeMb: STAGE_SIZE_MB['medium-grpo-fp16'],
     block: DEFAULT_BLOCK,
   },
   // `medium` fine-tuned on an Elo-balanced corpus (M4). The only stages that answer the "juega
