@@ -45,18 +45,25 @@ export function stageBlock(stage: Stage): number {
  * megabytes, so an estimate that drifts from the file is a promise the page does not keep. Read
  * them back with `python -c "import os; print(os.path.getsize(...))"` whenever a stage is
  * re-exported: `small` and the encoder both changed size when their weights did.
+ *
+ * Every number here was re-read from the staged `onnx` folders on 2026-09-20 and every
+ * one of them was wrong -- by 6 to 10 MB, always low, because they had been carried over from the
+ * plan's estimates and never corrected. The consent step had been under-promising every download
+ * since P2.
  */
 export const STAGE_SIZE_MB = {
-  'tiny-int8': 7,
-  'small-fp16': 75,
-  'small-int8': 41,
-  'medium-fp16': 221,
-  'medium-int8': 116,
-  'medium-dpo-fp16': 221,
-  'medium-elo-fp16': 221,
-  'medium-elo-int8': 116,
-  'medium-lora-fp16': 221,
-  'medium-lora-int8': 116,
+  'tiny-int8': 8,
+  'small-fp16': 79,
+  'small-int8': 43,
+  'medium-fp16': 231,
+  'medium-int8': 122,
+  'medium-dpo-fp16': 231,
+  'medium-elo-fp16': 231,
+  'medium-elo-int8': 122,
+  // The swappable export is 438 KB bigger than the ordinary one -- the cost of a graph that takes
+  // its LoRA factors as inputs is 0.19 % of the file, which is the whole argument for doing it.
+  'medium-lora-fp16': 232,
+  'medium-lora-int8': 122,
 } as const;
 
 /** Licence of every published Rukh model; shown before anything is downloaded. */
@@ -287,8 +294,8 @@ export const ENCODER_BLOCK = 69;
  * Download sizes in MB of the encoder exports, measured like `STAGE_SIZE_MB`.
  */
 export const ENCODER_SIZE_MB = {
-  'encoder-fp16': 75,
-  'encoder-int8': 41,
+  'encoder-fp16': 79,
+  'encoder-int8': 43,
 } as const;
 
 export const ENCODER_STAGES: Stage[] = [

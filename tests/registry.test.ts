@@ -134,8 +134,9 @@ describe('encoder stages', () => {
     for (const stage of ENCODER_STAGES) {
       expect(stage.sizeMb).toBe(ENCODER_SIZE_MB[stage.id as keyof typeof ENCODER_SIZE_MB]);
     }
-    expect(ENCODER_SIZE_MB['encoder-fp16']).toBe(75);
-    expect(ENCODER_SIZE_MB['encoder-int8']).toBe(41);
+    // Measured on the published files, not estimated: 78 745 459 and 43 393 427 bytes.
+    expect(ENCODER_SIZE_MB['encoder-fp16']).toBe(79);
+    expect(ENCODER_SIZE_MB['encoder-int8']).toBe(43);
     expect(ENCODER_SIZE_MB['encoder-fp16']).toBeGreaterThan(ENCODER_SIZE_MB['encoder-int8']);
   });
 
@@ -170,8 +171,8 @@ describe('encoder stages', () => {
   });
 
   it('adds the two downloads up for the "both loaded" line', () => {
-    expect(totalSizeMb(findStage('small-fp16'), findEncoderStage('encoder-fp16'))).toBe(150);
-    expect(totalSizeMb(findStage('small-int8'), findEncoderStage('encoder-int8'))).toBe(82);
+    expect(totalSizeMb(findStage('small-fp16'), findEncoderStage('encoder-fp16'))).toBe(158);
+    expect(totalSizeMb(findStage('small-int8'), findEncoderStage('encoder-int8'))).toBe(86);
     expect(totalSizeMb(TEST_STAGE, TEST_ENCODER_STAGE)).toBe(0.3);
     expect(totalSizeMb(undefined, undefined)).toBe(0);
   });
