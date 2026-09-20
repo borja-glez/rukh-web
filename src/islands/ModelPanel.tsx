@@ -210,8 +210,10 @@ export default function ModelPanel({
         <span class="caption" data-testid="adapter-hint">
           {styles.length === 0
             ? 'Solo la etapa con adaptadores intercambiables cambia de estilo'
-            : (styles.find((entry) => entry.id === adapter.value)?.hint ??
-              'Los pesos no se tocan: el estilo son 1,6 MB aparte')}
+            : phase !== 'ready'
+              ? 'Carga el modelo y podrás cambiarle el estilo sin descargar nada más'
+              : (styles.find((entry) => entry.id === adapter.value)?.hint ??
+                'Los pesos no se tocan: el estilo son 1,6 MB aparte')}
         </span>
       </label>
 
