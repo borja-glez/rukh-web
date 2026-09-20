@@ -94,3 +94,27 @@ export async function downloadModel(
   }
   return bytes;
 }
+
+/**
+ * Whether these bytes are already in the Cache API, so loading them costs no network.
+ *
+ * The consent step exists because downloading tens of megabytes over somebody's connection is a
+ * real cost they should get to refuse. Once the bytes are on their machine that cost is gone, and
+ * asking again is asking about a download that will not happen: a reload would show "75 MB" and
+ * then finish instantly from cache. This is what lets the page tell the two situations apart.
+ *
+ * Every failure answers `false`. A private window, blocked site data or a browser without the
+ * Cache API all mean "we cannot promise it is there", and the honest fallback is to ask.
+ */
+export async function isCached(
+  url: string,
+  deps: Pick<DownloadDeps, 'caches' | 'cacheName'>,
+): Promise<boolean> {
+  try {
+    const cache = await deps.caches?.open(deps.cacheName);
+    if (!cache) return false;
+    return (await cache.match(url)) !== undefined;
+  } catch {
+    return false;
+  }
+}

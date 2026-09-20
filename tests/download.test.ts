@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { downloadModel, type DownloadDeps } from '../src/lib/download';
+import { downloadModel, isCached, type DownloadDeps } from '../src/lib/download';
 
 const CACHE = 'rukh-models-test';
 const URL = 'https://example.invalid/model.onnx';
@@ -145,5 +145,30 @@ describe('downloading the weights', () => {
     stream.finish();
     expect((await pending).byteLength).toBe(4);
     expect(seen.at(-1)).toBe(4);
+  });
+});
+
+describe('isCached', () => {
+  it('answers true only when the bytes are really there', async () => {
+    const store = new Map<string, Response>([['https://hub/model.onnx', new Response('x')]]);
+    const caches = {
+      open: async () => ({ match: async (url: string) => store.get(url) }),
+    } as unknown as CacheStorage;
+
+    expect(await isCached('https://hub/model.onnx', { caches, cacheName: 'c' })).toBe(true);
+    expect(await isCached('https://hub/other.onnx', { caches, cacheName: 'c' })).toBe(false);
+  });
+
+  it('answers false rather than throwing where the Cache API is unavailable or blocked', async () => {
+    // A private window, blocked site data, or an old browser. "We cannot promise it is there"
+    // has to fall back to asking, never to assuming.
+    expect(await isCached('https://hub/m.onnx', { caches: undefined, cacheName: 'c' })).toBe(false);
+
+    const hostile = {
+      open: async () => {
+        throw new Error('site data blocked');
+      },
+    } as unknown as CacheStorage;
+    expect(await isCached('https://hub/m.onnx', { caches: hostile, cacheName: 'c' })).toBe(false);
   });
 });

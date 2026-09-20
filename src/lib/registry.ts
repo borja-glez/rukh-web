@@ -41,6 +41,9 @@ export const STAGE_SIZE_MB = {
   'tiny-int8': 7,
   'small-fp16': 75,
   'small-int8': 41,
+  'medium-fp16': 221,
+  'medium-int8': 116,
+  'medium-dpo-fp16': 221,
 } as const;
 
 /** Licence of every published Rukh model; shown before anything is downloaded. */
@@ -74,6 +77,36 @@ export const STAGES: Stage[] = [
     repo: 'chorcat/rukh-small',
     file: 'onnx/model-int8.onnx',
     sizeMb: STAGE_SIZE_MB['small-int8'],
+    block: DEFAULT_BLOCK,
+  },
+  // `medium` is three times the parameters and three times the download. It is offered but never
+  // the default: 221 MB is a lot to spend on somebody's connection without them choosing it.
+  {
+    id: 'medium-fp16',
+    label: 'Rukh medium (fp16)',
+    kind: 'onnx',
+    repo: 'chorcat/rukh-medium',
+    file: 'onnx/model-fp16.onnx',
+    sizeMb: STAGE_SIZE_MB['medium-fp16'],
+    block: DEFAULT_BLOCK,
+  },
+  {
+    id: 'medium-int8',
+    label: 'Rukh medium (int8)',
+    kind: 'onnx',
+    repo: 'chorcat/rukh-medium',
+    file: 'onnx/model-int8.onnx',
+    sizeMb: STAGE_SIZE_MB['medium-int8'],
+    block: DEFAULT_BLOCK,
+  },
+  // The strongest model the project has: `medium` after DPO on engine-scored move pairs.
+  {
+    id: 'medium-dpo-fp16',
+    label: 'Rukh medium + DPO (fp16)',
+    kind: 'onnx',
+    repo: 'chorcat/rukh-medium-dpo',
+    file: 'onnx/model-fp16.onnx',
+    sizeMb: STAGE_SIZE_MB['medium-dpo-fp16'],
     block: DEFAULT_BLOCK,
   },
 ];

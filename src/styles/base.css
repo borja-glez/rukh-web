@@ -270,10 +270,14 @@ select {
     );
   }
 
+  /* Not sticky, on purpose. The panel holds the model card and the whole move list, so it is
+     routinely taller than the viewport (1041 px against 1000 at this breakpoint). A sticky box
+     taller than the window never reaches the state that makes sticky useful: it slides down with
+     the scroll instead, and a grid item's sticky containing block is the grid *container*, not
+     its own area, so it walked straight over the "Más" drawer underneath and hid a third of it.
+     Nothing was gained to weigh against that. */
   .panel {
     max-width: none;
-    position: sticky;
-    top: calc(var(--header-h) + env(safe-area-inset-top) + 16px);
   }
 }
 

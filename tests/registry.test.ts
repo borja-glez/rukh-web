@@ -21,15 +21,27 @@ import {
 } from '../src/lib/registry';
 
 describe('stage registry', () => {
-  it('keeps the mock first and lists the three ONNX stages', () => {
+  it('keeps the mock first and every other stage an ONNX one', () => {
     expect(STAGES.map((stage) => stage.id)).toEqual([
       'mock',
       'tiny-int8',
       'small-fp16',
       'small-int8',
+      'medium-fp16',
+      'medium-int8',
+      'medium-dpo-fp16',
     ]);
     expect(STAGES[0].kind).toBe('mock');
     expect(STAGES.slice(1).every((stage) => stage.kind === 'onnx')).toBe(true);
+  });
+
+  it('never defaults to a stage that costs hundreds of megabytes', () => {
+    // `medium` is offered but chosen, never assumed: 221 MB is not something to spend on
+    // somebody's connection because they opened the page.
+    for (const conditions of [{}, { webgpu: true }, { webgpu: false }, { saveData: true }]) {
+      const chosen = findStage(defaultStageId(conditions));
+      expect(chosen?.sizeMb ?? 0).toBeLessThanOrEqual(STAGE_SIZE_MB['small-fp16']);
+    }
   });
 
   it('declares the measured sizes in one place', () => {

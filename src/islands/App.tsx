@@ -32,6 +32,7 @@ import {
   type Stage,
 } from '../lib/registry';
 import { MODEL_CACHE, type Backend, type ProgressMessage } from '../lib/worker-protocol';
+import { isCached } from '../lib/download';
 import { fenToTokens, UciTokenizer } from '../lib/chess-lm';
 import { createDecoder, type Decoder } from '../workers/decoder-client';
 import { createEncoder, type Encoder } from '../workers/encoder-client';
@@ -239,6 +240,21 @@ function undo() {
   void settle();
 }
 
+/**
+ * Are this stage's bytes already on the machine? Used to skip a consent step that would be
+ * asking about a download that will not happen.
+ *
+ * The consent step buys the reader a choice about spending tens of megabytes of their
+ * connection. After a reload the bytes are in the Cache API and that cost is zero, so the
+ * question is noise: they would accept "75 MB", watch the bar finish instantly, and learn
+ * nothing. Where the Cache API cannot answer -- private window, blocked site data -- this says
+ * no and the page asks, which is the safe direction.
+ */
+async function alreadyOnDisk(entry: Stage): Promise<boolean> {
+  if (entry.kind === 'mock' || !entry.repo) return false;
+  return isCached(modelUrl(entry), { caches: globalThis.caches, cacheName: MODEL_CACHE });
+}
+
 /** Downloads the stage and creates the session. Only ever called from the consent step. */
 async function load() {
   const entry = currentStage();
@@ -409,6 +425,18 @@ export default function App() {
     stage.value = query.stage;
     encoderStage.value = query.encoder;
     status.value = currentStage().kind === 'mock' ? 'mock' : 'consent';
+    // A reload finds the weights in the Cache API. Asking again would be asking about a
+    // download that will not happen, so the model just loads.
+    void (async () => {
+      const entry = currentStage();
+      if (entry.kind !== 'mock' && (await alreadyOnDisk(entry)) && status.value === 'consent') {
+        void load();
+      }
+      const bar = findEncoderStage(encoderStage.value);
+      if (bar && (await alreadyOnDisk(bar)) && encoderStatus.value === 'consent') {
+        void loadEncoder();
+      }
+    })();
     if (query.color !== human.value) {
       human.value = query.color;
     }

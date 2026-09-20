@@ -77,3 +77,30 @@ test.describe('single-screen layout', () => {
     await expectBoardFits(page, 300);
   });
 });
+
+test.describe('the "Más" drawer', () => {
+  test('is never covered by the panel column', async ({ page }, testInfo) => {
+    // The panel used to be `position: sticky` while being taller than the viewport, so scrolling
+    // slid it down over the drawer and hid its third column ("Qué ve el modelo") completely. A
+    // grid item's sticky containing block is the grid container, not its own cell, so nothing
+    // stopped it. This measures in page coordinates, after a scroll, which is the only way the
+    // old bug shows up at all.
+    test.skip(testInfo.project.name === 'mobile', 'one column: the drawer has no panel beside it');
+    await openBoard(page);
+    await page.locator('.drawer__summary').click();
+    await page.locator('.drawer').scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+
+    const boxes = await page.evaluate(() => {
+      const rect = (q: string) => {
+        const r = document.querySelector(q)!.getBoundingClientRect();
+        return { top: r.top + scrollY, bottom: r.bottom + scrollY, left: r.left, right: r.right };
+      };
+      return { panel: rect('[data-testid="panel"]'), drawer: rect('.drawer') };
+    });
+
+    const overlapsVertically = boxes.panel.bottom > boxes.drawer.top;
+    const overlapsHorizontally = boxes.drawer.right > boxes.panel.left;
+    expect(overlapsVertically && overlapsHorizontally).toBe(false);
+  });
+});
