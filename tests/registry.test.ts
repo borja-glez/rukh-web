@@ -32,7 +32,7 @@ describe('stage registry', () => {
     expect(STAGES.slice(1).every((stage) => stage.kind === 'onnx')).toBe(true);
   });
 
-  it('declares the provisional sizes in one place', () => {
+  it('declares the measured sizes in one place', () => {
     for (const stage of STAGES.slice(1)) {
       expect(stage.sizeMb).toBe(STAGE_SIZE_MB[stage.id as keyof typeof STAGE_SIZE_MB]);
     }
@@ -106,12 +106,12 @@ describe('encoder stages', () => {
     }
   });
 
-  it('declares the provisional encoder sizes in one place', () => {
+  it('declares the measured encoder sizes in one place', () => {
     for (const stage of ENCODER_STAGES) {
       expect(stage.sizeMb).toBe(ENCODER_SIZE_MB[stage.id as keyof typeof ENCODER_SIZE_MB]);
     }
-    expect(ENCODER_SIZE_MB['encoder-fp16']).toBe(30);
-    expect(ENCODER_SIZE_MB['encoder-int8']).toBe(15);
+    expect(ENCODER_SIZE_MB['encoder-fp16']).toBe(75);
+    expect(ENCODER_SIZE_MB['encoder-int8']).toBe(41);
     expect(ENCODER_SIZE_MB['encoder-fp16']).toBeGreaterThan(ENCODER_SIZE_MB['encoder-int8']);
   });
 
@@ -146,8 +146,8 @@ describe('encoder stages', () => {
   });
 
   it('adds the two downloads up for the "both loaded" line', () => {
-    expect(totalSizeMb(findStage('small-fp16'), findEncoderStage('encoder-fp16'))).toBe(110);
-    expect(totalSizeMb(findStage('small-int8'), findEncoderStage('encoder-int8'))).toBe(55);
+    expect(totalSizeMb(findStage('small-fp16'), findEncoderStage('encoder-fp16'))).toBe(150);
+    expect(totalSizeMb(findStage('small-int8'), findEncoderStage('encoder-int8'))).toBe(82);
     expect(totalSizeMb(TEST_STAGE, TEST_ENCODER_STAGE)).toBe(0.3);
     expect(totalSizeMb(undefined, undefined)).toBe(0);
   });

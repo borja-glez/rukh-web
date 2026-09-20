@@ -31,15 +31,16 @@ export function stageBlock(stage: Stage): number {
 }
 
 /**
- * Download sizes in MB. **Provisional**: they are the plan's estimates for the fp16 and int8
- * exports and the controller updates them here, in this one place, after the real export
- * (`rukh export ... --fp16 --int8`) reports the file sizes. They only drive the consent copy and
- * the progress bar fallback, never the download itself.
+ * Download sizes in MB, **measured** on the published files rather than estimated. They drive
+ * the consent copy, which is the last thing a reader sees before the browser fetches tens of
+ * megabytes, so an estimate that drifts from the file is a promise the page does not keep. Read
+ * them back with `python -c "import os; print(os.path.getsize(...))"` whenever a stage is
+ * re-exported: `small` and the encoder both changed size when their weights did.
  */
 export const STAGE_SIZE_MB = {
-  'tiny-int8': 6,
-  'small-fp16': 80,
-  'small-int8': 40,
+  'tiny-int8': 7,
+  'small-fp16': 75,
+  'small-int8': 41,
 } as const;
 
 /** Licence of every published Rukh model; shown before anything is downloaded. */
@@ -108,14 +109,11 @@ export const TEST_STAGE: Stage = {
 export const ENCODER_BLOCK = 69;
 
 /**
- * Download sizes in MB of the encoder exports. **Provisional**, exactly like `STAGE_SIZE_MB`:
- * they are the plan's estimates and the controller updates them here, in this one place, once the
- * real export reports the file sizes. They only drive the consent copy and the progress bar
- * fallback, never the download itself.
+ * Download sizes in MB of the encoder exports, measured like `STAGE_SIZE_MB`.
  */
 export const ENCODER_SIZE_MB = {
-  'encoder-fp16': 30,
-  'encoder-int8': 15,
+  'encoder-fp16': 75,
+  'encoder-int8': 41,
 } as const;
 
 export const ENCODER_STAGES: Stage[] = [
@@ -172,8 +170,11 @@ export function encoderBlock(stage: Stage): number {
 }
 
 /**
- * Encoder chosen when the page is opened without `?encoder=`: the 15 MB int8 export on mobile or
- * with data saver on, the 30 MB fp16 one elsewhere.
+ * Encoder chosen when the page is opened without `?encoder=`: the 41 MB int8 export on mobile or
+ * with data saver on, the 75 MB fp16 one elsewhere.
+ *
+ * Those numbers are what the consent step shows before anything is fetched, so they track the
+ * published files: the encoder grew from 15 M to 39 M parameters, and the exports with it.
  *
  * Deliberately **not** the decoder's rule. The encoder's int8 export agrees with its checkpoint
  * on 100 % of the parity positions, in all three precisions, so here the 15 MB saved costs
