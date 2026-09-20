@@ -5,6 +5,7 @@ import {
   assertScalarOutput,
   assertVocab,
   declaredVocab,
+  readAdapterShape,
   readContract,
   readEncoderContract,
   BLUNDER_OUTPUT,
@@ -56,6 +57,7 @@ describe('the model contract', () => {
     expect(readContract(session(['batch', VOCAB]), VOCAB, DEFAULT_BLOCK)).toEqual({
       block: DEFAULT_BLOCK,
       vocab: VOCAB,
+      adapter: null,
     });
   });
 
@@ -211,5 +213,56 @@ describe("the encoder's contract", () => {
     expect(() => assertInRange(1, BLUNDER_OUTPUT, BLUNDER_RANGE)).not.toThrow();
     expect(() => assertInRange(-0.1, BLUNDER_OUTPUT, BLUNDER_RANGE)).toThrow(/blunder/);
     expect(() => assertInRange(4.2, BLUNDER_OUTPUT, BLUNDER_RANGE)).toThrow(/blunder/);
+  });
+});
+
+describe('readAdapterShape', () => {
+  const graph = (inputs: string[], metadata: { name: string; shape: (number | string)[] }[]) => ({
+    outputNames: ['logits'],
+    outputMetadata: [{ name: 'logits', shape: ['batch', 2030] }],
+    inputNames: inputs,
+    inputMetadata: metadata,
+  });
+
+  it('is null for an ordinary graph', () => {
+    expect(readAdapterShape(graph(['idx'], [{ name: 'idx', shape: ['batch', 'sequence'] }]))).toBe(
+      null,
+    );
+  });
+
+  it('reads the two fixed shapes a swappable graph declares', () => {
+    const shape = readAdapterShape(
+      graph(
+        ['idx', 'lora_a', 'lora_b'],
+        [
+          { name: 'idx', shape: ['batch', 'sequence'] },
+          { name: 'lora_a', shape: [16, 2, 8, 768] },
+          { name: 'lora_b', shape: [16, 2, 768, 8] },
+        ],
+      ),
+    );
+    // 393 216 floats is the whole adapter: 1.5 MiB against the 440 MB it corrects.
+    expect(shape).toEqual({ a: [16, 2, 8, 768], b: [16, 2, 768, 8], floats: 393_216 });
+  });
+
+  it('refuses a graph that declares the factors without a size', () => {
+    // Nothing could be fed: not even the zero adapter, which is what "no style" runs.
+    expect(() =>
+      readAdapterShape(
+        graph(
+          ['idx', 'lora_a', 'lora_b'],
+          [
+            { name: 'lora_a', shape: [16, 2, 8, 'rank'] },
+            { name: 'lora_b', shape: [16, 2, 768, 8] },
+          ],
+        ),
+      ),
+    ).toThrow(/no declara su tamaño/);
+  });
+
+  it('refuses a graph with only half of the pair', () => {
+    expect(() =>
+      readAdapterShape(graph(['idx', 'lora_a'], [{ name: 'lora_a', shape: [16, 2, 8, 768] }])),
+    ).toThrow(/no es un fichero con adaptadores intercambiables/);
   });
 });

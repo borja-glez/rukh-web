@@ -111,9 +111,16 @@ test.describe('playing against the ONNX decoder', () => {
     const elo = page.getByLabel('Elo objetivo');
     await expect(elo).toBeEnabled();
     await expect(page.getByTestId('elo-hint')).toHaveCount(0);
-    // Five, not the twenty-seven the vocabulary has: a control the player can turn is a claim
+    // Six, not the twenty-seven the vocabulary has: a control the player can turn is a claim
     // that turning it does something, and the claim is as wide as the sweep that backs it.
-    await expect(elo.locator('option')).toHaveText(['1200', '1500', '1800', '2100', '2400']);
+    await expect(elo.locator('option')).toHaveText([
+      '1200',
+      '1500',
+      '1800',
+      '2000',
+      '2100',
+      '2400',
+    ]);
     await expect(elo).toHaveValue('1800');
   });
 

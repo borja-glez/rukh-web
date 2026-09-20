@@ -120,7 +120,16 @@ export async function createSession(bytes: Uint8Array): Promise<CreatedSession> 
 export function inputFeeds(
   session: ort.InferenceSession,
   ids: readonly number[],
+  extra?: Record<string, ort.Tensor>,
 ): Record<string, ort.Tensor> {
   const data = BigInt64Array.from(ids, (id) => BigInt(id));
-  return { [session.inputNames[0]]: new ort.Tensor('int64', data, [1, ids.length]) };
+  return {
+    [session.inputNames[0]]: new ort.Tensor('int64', data, [1, ids.length]),
+    ...(extra ?? {}),
+  };
+}
+
+/** A float32 tensor for one of the graph's fixed-shape inputs (the LoRA factors). */
+export function floatTensor(data: Float32Array, shape: readonly number[]): ort.Tensor {
+  return new ort.Tensor('float32', data, shape.slice());
 }

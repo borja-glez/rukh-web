@@ -13,7 +13,14 @@
 import type * as ort from 'onnxruntime-web/webgpu';
 import { RUN_SOURCE, assertVocab, readContract, type ModelContract } from '../lib/contract';
 import type { DecoderRequest, WorkerResponse } from '../lib/worker-protocol';
-import { configureOrt, createSerial, createSession, fetchModel, inputFeeds } from './ort-runtime';
+import {
+  configureOrt,
+  createSerial,
+  createSession,
+  fetchModel,
+  floatTensor,
+  inputFeeds,
+} from './ort-runtime';
 
 /** The worker global, typed with just what this file uses (avoids pulling in the webworker lib). */
 interface WorkerScope {
@@ -30,6 +37,17 @@ configureOrt();
 let session: ort.InferenceSession | null = null;
 /** Block and vocabulary the live session was accepted under; null while there is no session. */
 let contract: ModelContract | null = null;
+
+/**
+ * The style adapter fed on every call, and the zeros that stand in for "no style".
+ *
+ * Both are allocated once per session and reused: they are the same 1.6 MB on every move, and a
+ * fresh `Float32Array` per inference would be a megabyte and a half of garbage per move for
+ * nothing. `zeros` is not a special case in the graph — the export is built so that an adapter of
+ * zeros computes the base model exactly — so the plain stage and the styled one run the same code.
+ */
+let adapter: { a: Float32Array; b: Float32Array; id: string } | null = null;
+let zeros: { a: Float32Array; b: Float32Array } | null = null;
 
 /** The single chain every ORT call is queued on: no two sessions or runs are ever in flight. */
 const serial = createSerial();
@@ -62,6 +80,13 @@ async function init(request: Extract<DecoderRequest, { type: 'init' }>): Promise
     const checked = readContract(created.session, request.vocab, request.block);
     session = created.session;
     contract = checked;
+    adapter = null;
+    zeros = checked.adapter
+      ? {
+          a: new Float32Array(sizeOf(checked.adapter.a)),
+          b: new Float32Array(sizeOf(checked.adapter.b)),
+        }
+      : null;
     return { backend: created.backend, reason: created.reason, contract: checked };
   });
   reply({
@@ -72,6 +97,66 @@ async function init(request: Extract<DecoderRequest, { type: 'init' }>): Promise
     loadMs: Math.round(performance.now() - started),
     block: ready.contract.block,
     vocab: ready.contract.vocab,
+    adapterFloats: ready.contract.adapter?.floats ?? 0,
+  });
+}
+
+function sizeOf(shape: readonly number[]): number {
+  return shape.reduce((total, dim) => total * dim, 1);
+}
+
+/** The two tensors the graph wants this call, whether a style is loaded or not. */
+function adapterFeeds(live: ModelContract) {
+  if (!live.adapter || !zeros) return undefined;
+  const factors = adapter ?? zeros;
+  return {
+    lora_a: floatTensor(factors.a, live.adapter.a),
+    lora_b: floatTensor(factors.b, live.adapter.b),
+  };
+}
+
+/**
+ * Downloads a style adapter and installs it, or clears it when there is no url.
+ *
+ * The length check is the whole validation: the graph declares how many floats an adapter for it
+ * has, so a file of any other size belongs to another model and would be read as garbage laid
+ * over the right weights — a model that plays legally and badly, which is the worst kind of wrong.
+ */
+async function setAdapter(request: Extract<DecoderRequest, { type: 'adapter' }>): Promise<void> {
+  const started = performance.now();
+  const floats = await serial(async () => {
+    const live = contract;
+    if (!live) throw new Error('el modelo todavía no está cargado');
+    if (!live.adapter) {
+      throw new Error('esta etapa no admite adaptadores de estilo');
+    }
+    if (request.url === null) {
+      adapter = null;
+      return 0;
+    }
+    const bytes = await fetchModel(request.url, request.sizeBytes, (loaded, total) =>
+      reply({ type: 'progress', id: request.id, loaded, total }),
+    );
+    const expected = live.adapter.floats * 4;
+    if (bytes.byteLength !== expected) {
+      throw new Error(
+        `El adaptador no encaja con este modelo: trae ${bytes.byteLength} bytes y el fichero ` +
+          `espera ${expected}. No se cambia de estilo con él.`,
+      );
+    }
+    // `fetchModel` returns a fresh buffer, but not necessarily one aligned for Float32Array.
+    const aligned = bytes.byteOffset % 4 === 0 ? bytes : new Uint8Array(bytes.slice().buffer);
+    const all = new Float32Array(aligned.buffer, aligned.byteOffset, live.adapter.floats);
+    const sizeA = sizeOf(live.adapter.a);
+    adapter = { a: all.slice(0, sizeA), b: all.slice(sizeA), id: request.adapter };
+    return live.adapter.floats;
+  });
+  reply({
+    type: 'adapter-ready',
+    id: request.id,
+    adapter: request.url === null ? '' : request.adapter,
+    floats,
+    loadMs: Math.round(performance.now() - started),
   });
 }
 
@@ -80,7 +165,7 @@ async function logits(request: Extract<DecoderRequest, { type: 'logits' }>): Pro
     const current = session;
     const live = contract;
     if (!current || !live) throw new Error('el modelo todavía no está cargado');
-    const feeds = inputFeeds(current, request.ids);
+    const feeds = inputFeeds(current, request.ids, adapterFeeds(live));
     const started = performance.now();
     const output = await current.run(feeds);
     const inferMs = performance.now() - started;
@@ -105,6 +190,8 @@ async function dispose(request: Extract<DecoderRequest, { type: 'dispose' }>): P
     await session?.release();
     session = null;
     contract = null;
+    adapter = null;
+    zeros = null;
   });
   reply({ type: 'disposed', id: request.id });
 }
@@ -117,6 +204,8 @@ ctx.addEventListener('message', (event: MessageEvent) => {
         return init(request);
       case 'logits':
         return logits(request);
+      case 'adapter':
+        return setAdapter(request);
       case 'dispose':
         return dispose(request);
       default:

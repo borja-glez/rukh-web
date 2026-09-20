@@ -53,6 +53,22 @@ export interface DisposeRequest {
   id: number;
 }
 
+/**
+ * Loads (or clears) the style adapter of a session whose graph takes its LoRA factors as inputs.
+ *
+ * `url: null` clears it, which feeds an adapter of zeros — and an adapter of zeros is exactly the
+ * base model, by construction and by test (`tests/unit/test_export_adapter.py`). So "no style" is
+ * not a different session or a different file; it is the same graph with nothing added.
+ */
+export interface AdapterRequest {
+  type: 'adapter';
+  id: number;
+  /** Adapter id from the registry, for diagnostics; empty when clearing. */
+  adapter: string;
+  url: string | null;
+  sizeBytes: number;
+}
+
 /** Everything `encoder.worker.ts` needs to download a stage and create its session. */
 export interface EncoderInitRequest {
   type: 'encoder-init';
@@ -72,7 +88,7 @@ export interface EvaluateRequest {
   ids: number[];
 }
 
-export type DecoderRequest = InitRequest | LogitsRequest | DisposeRequest;
+export type DecoderRequest = InitRequest | LogitsRequest | AdapterRequest | DisposeRequest;
 export type EncoderRequest = EncoderInitRequest | EvaluateRequest | DisposeRequest;
 export type WorkerRequest = DecoderRequest | EncoderRequest;
 
@@ -93,6 +109,8 @@ export interface ReadyMessage {
   /** The contract the session was checked against; `buildPrompt` crops to `block`. */
   block: number;
   vocab: number;
+  /** Floats a style adapter for this file has, or 0 when the graph takes none. */
+  adapterFloats: number;
 }
 
 export interface LogitsMessage {
@@ -129,6 +147,16 @@ export interface DisposedMessage {
   id: number;
 }
 
+export interface AdapterMessage {
+  type: 'adapter-ready';
+  id: number;
+  /** Which adapter is live now; empty string when the session is back to the plain model. */
+  adapter: string;
+  /** Floats fed on every call, so the panel can say what a style costs per move. */
+  floats: number;
+  loadMs: number;
+}
+
 export interface ErrorMessage {
   type: 'error';
   id: number;
@@ -142,6 +170,7 @@ export type WorkerResponse =
   | EncoderReadyMessage
   | EvaluationMessage
   | DisposedMessage
+  | AdapterMessage
   | ErrorMessage;
 
 const RESPONSE_TYPES = [
@@ -151,6 +180,7 @@ const RESPONSE_TYPES = [
   'encoder-ready',
   'evaluation',
   'disposed',
+  'adapter-ready',
   'error',
 ] as const;
 
