@@ -173,7 +173,12 @@ export function encoderBlock(stage: Stage): number {
 
 /**
  * Encoder chosen when the page is opened without `?encoder=`: the 15 MB int8 export on mobile or
- * with data saver on, the 30 MB fp16 one elsewhere — the same rule as the decoder's.
+ * with data saver on, the 30 MB fp16 one elsewhere.
+ *
+ * Deliberately **not** the decoder's rule. The encoder's int8 export agrees with its checkpoint
+ * on 100 % of the parity positions, in all three precisions, so here the 15 MB saved costs
+ * nothing measurable and a phone may as well take it. The asymmetry is the measurement, not a
+ * preference (D-063).
  */
 export function defaultEncoderId(conditions: Conditions = {}): string {
   return conditions.saveData || conditions.mobile ? 'encoder-int8' : 'encoder-fp16';
@@ -205,14 +210,24 @@ export interface Conditions {
   saveData?: boolean;
   /** True on a phone-sized or coarse-pointer device. */
   mobile?: boolean;
+  /** Whether the browser exposes WebGPU. `undefined` when it cannot be known (SSR). */
+  webgpu?: boolean;
 }
 
 /**
- * Stage selected when the page is opened without `?stage=`: the 40 MB int8 export on mobile or
- * with data saver on, the 80 MB fp16 one elsewhere.
+ * Stage selected when the page is opened without `?stage=`.
+ *
+ * The precision follows the **backend**, not the screen. int8 picks a different move than the
+ * PyTorch checkpoint in 4.6 % of positions (`onnx/parity.json`), so a device served int8 is not
+ * playing the model whose Elo the cards publish; fp16 diverges in 0.2 %. Screen size says
+ * nothing about that, and phones have had WebGPU for a while, so the old `mobile -> int8` rule
+ * downgraded the model on hardware that could run the good one. int8 is now reserved for the
+ * two cases that genuinely need it: the WASM fallback, which has no practical fp16 path, and
+ * data saver, which is the user asking for fewer bytes (D-063).
  */
 export function defaultStageId(conditions: Conditions = {}): string {
-  return conditions.saveData || conditions.mobile ? 'small-int8' : 'small-fp16';
+  if (conditions.saveData) return 'small-int8';
+  return conditions.webgpu === false ? 'small-int8' : 'small-fp16';
 }
 
 /** `defaultStageId` reading the browser it runs in; falls back to the desktop choice. */
@@ -223,5 +238,9 @@ export function detectConditions(): Conditions {
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
       ? window.matchMedia('(max-width: 820px), (pointer: coarse)').matches
       : false;
-  return { saveData: connection?.saveData === true, mobile };
+  // `navigator.gpu` is synchronous and `parseQuery` is too. A missing `gpu` is conclusive: there
+  // is no WebGPU. A present one can still fail to yield an adapter, and then the worker falls
+  // back to WASM on its own and reports the backend it really used.
+  const webgpu = 'gpu' in navigator && navigator.gpu != null;
+  return { saveData: connection?.saveData === true, mobile, webgpu };
 }

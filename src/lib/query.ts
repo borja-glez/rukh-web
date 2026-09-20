@@ -18,8 +18,9 @@ export interface Query {
 /**
  * Parses the page query string. `mock` is forced by `?mock=1` and is also true when the
  * requested stage is unknown or is itself the mock, so the E2E suite never downloads anything.
- * Without `?stage=` the default comes from the device (`small-int8` on mobile or with data
- * saver on, `small-fp16` otherwise) and nothing is fetched until the user consents.
+ * Without `?stage=` the default comes from the device (`small-fp16` wherever WebGPU runs,
+ * `small-int8` on the WASM fallback or with data saver on) and nothing is fetched until the
+ * user consents.
  * `?color=b` makes the human play black.
  *
  * `?encoder=` picks the evaluation bar's model the same way (`encoder-int8` on mobile or with
