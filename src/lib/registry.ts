@@ -53,6 +53,10 @@ export const STAGE_SIZE_MB = {
   'medium-fp16': 221,
   'medium-int8': 116,
   'medium-dpo-fp16': 221,
+  'medium-elo-fp16': 221,
+  'medium-elo-int8': 116,
+  'medium-lora-fp16': 221,
+  'medium-lora-int8': 116,
 } as const;
 
 /** Licence of every published Rukh model; shown before anything is downloaded. */
@@ -199,6 +203,52 @@ export const STAGES: Stage[] = [
     file: 'onnx/model-fp16.onnx',
     sizeMb: STAGE_SIZE_MB['medium-dpo-fp16'],
     block: DEFAULT_BLOCK,
+  },
+  // `medium` fine-tuned on an Elo-balanced corpus (M4). The only stages that answer the "juega
+  // como" selector: the twelve headers below 1800 had never received a gradient until this run,
+  // so on every other stage the control would be asking the model to read noise.
+  {
+    id: 'medium-elo-fp16',
+    label: 'Rukh medium + Elo (fp16)',
+    kind: 'onnx',
+    repo: 'chorcat/rukh-medium-elo',
+    file: 'onnx/model-fp16.onnx',
+    sizeMb: STAGE_SIZE_MB['medium-elo-fp16'],
+    block: DEFAULT_BLOCK,
+    eloConditioned: true,
+  },
+  {
+    id: 'medium-elo-int8',
+    label: 'Rukh medium + Elo (int8)',
+    kind: 'onnx',
+    repo: 'chorcat/rukh-medium-elo',
+    file: 'onnx/model-int8.onnx',
+    sizeMb: STAGE_SIZE_MB['medium-elo-int8'],
+    block: DEFAULT_BLOCK,
+    eloConditioned: true,
+  },
+  // The same weights as `medium`, exported with the LoRA factors as inputs of the graph. It is
+  // a separate stage and not a replacement because the file is a separate download: somebody who
+  // already has `medium-fp16` cached should not lose it to a swap they may never use.
+  {
+    id: 'medium-lora-fp16',
+    label: 'Rukh medium + estilo (fp16)',
+    kind: 'onnx',
+    repo: 'chorcat/rukh-medium',
+    file: 'onnx/model-lora-fp16.onnx',
+    sizeMb: STAGE_SIZE_MB['medium-lora-fp16'],
+    block: DEFAULT_BLOCK,
+    adaptable: true,
+  },
+  {
+    id: 'medium-lora-int8',
+    label: 'Rukh medium + estilo (int8)',
+    kind: 'onnx',
+    repo: 'chorcat/rukh-medium',
+    file: 'onnx/model-lora-int8.onnx',
+    sizeMb: STAGE_SIZE_MB['medium-lora-int8'],
+    block: DEFAULT_BLOCK,
+    adaptable: true,
   },
 ];
 
