@@ -49,6 +49,20 @@ export const STAGE_SIZE_MB = {
 /** Licence of every published Rukh model; shown before anything is downloaded. */
 export const MODEL_LICENSE = 'Apache-2.0';
 
+/**
+ * Elo headers the "juega como" selector offers, and the reason it is a short list.
+ *
+ * These are the conditions that were actually *measured*, one full run of the suite each
+ * (`rukh eval sweep`, M4). The vocabulary has twenty-seven of them and the model will answer any,
+ * but offering twenty-seven would promise twenty-seven measurements and there are five. A control
+ * a player turns is a claim that turning it does something, and the claim is only as wide as the
+ * evidence behind it.
+ */
+export const ELO_TARGETS = [1200, 1500, 1800, 2100, 2400] as const;
+
+/** The header a conditioned stage starts at: the one every published number was read at. */
+export const DEFAULT_ELO = 1800;
+
 /** Model stages offered by the demo. `mock` stays first: it is what `?mock=1` falls back to. */
 export const STAGES: Stage[] = [
   { id: 'mock', label: 'Primera jugada legal', kind: 'mock', sizeMb: 0 },
@@ -186,8 +200,25 @@ export const TEST_ENCODER_STAGE: Stage = {
   block: ENCODER_BLOCK,
 };
 
+/**
+ * The same toy graph, flagged as conditioned, so the E2E suite can walk the *enabled* path of the
+ * Elo selector without downloading 221 MB from the Hub.
+ *
+ * The flag says what the registry claims about a stage, and what is under test is the wiring that
+ * reads it: the control is enabled, the hint disappears, and the chosen header reaches the
+ * tokenizer. Whether the weights behind it were really trained on the Elo axis is a question for
+ * `rukh eval sweep`, and no browser test could answer it anyway.
+ */
+export const TEST_ELO_STAGE: Stage = {
+  ...TEST_STAGE,
+  id: 'test-elo',
+  label: 'ONNX de juguete, condicionado (pruebas)',
+  eloConditioned: true,
+};
+
 export function findStage(id: string): Stage | undefined {
   if (id === TEST_STAGE.id) return TEST_STAGE;
+  if (id === TEST_ELO_STAGE.id) return TEST_ELO_STAGE;
   return STAGES.find((stage) => stage.id === id);
 }
 

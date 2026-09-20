@@ -5,6 +5,7 @@ import {
   findEncoderStage,
   findStage,
   totalSizeMb,
+  ELO_TARGETS,
   ENCODER_STAGES,
   MODEL_LICENSE,
   selectableStages,
@@ -58,9 +59,6 @@ const CACHE_LABEL: Record<CacheState, string> = {
 
 /** How long the button keeps its answer before offering itself again. */
 const CACHE_RESET_MS = 4000;
-
-/** Elo targets offered once the conditioned checkpoints land (M4). */
-const ELO_TARGETS = Array.from({ length: 13 }, (_, i) => 1200 + i * 100);
 
 const BACKEND_LABEL: Record<Backend, string> = { webgpu: 'WebGPU', wasm: 'WASM' };
 
@@ -164,7 +162,7 @@ export default function ModelPanel({
           class="select"
           value={String(elo.value)}
           disabled={!current.eloConditioned}
-          title={current.eloConditioned ? undefined : 'Condicionar por Elo llega en M4'}
+          title={current.eloConditioned ? undefined : 'Esta etapa no está condicionada por Elo'}
           onChange={(event) =>
             (elo.value = Number((event.currentTarget as HTMLSelectElement).value))
           }
@@ -177,7 +175,7 @@ export default function ModelPanel({
         </select>
         {!current.eloConditioned ? (
           <span class="caption" data-testid="elo-hint">
-            Condicionar por Elo llega en M4
+            Solo la etapa condicionada responde al Elo objetivo
           </span>
         ) : null}
       </label>

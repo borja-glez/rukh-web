@@ -98,11 +98,23 @@ test.describe('playing against the ONNX decoder', () => {
     await expect(page.getByTestId('model-error')).toHaveCount(0);
   });
 
-  test('the Elo selector waits for the conditioned checkpoints', async ({ page }) => {
+  test('the Elo selector stays off for a stage that is not conditioned', async ({ page }) => {
     await openStage(page);
     const elo = page.getByLabel('Elo objetivo');
     await expect(elo).toBeDisabled();
-    await expect(page.getByTestId('elo-hint')).toContainText('M4');
+    await expect(page.getByTestId('elo-hint')).toContainText('condicionada');
+  });
+
+  test('the Elo selector offers only the conditions that were measured', async ({ page }) => {
+    await page.goto('/?stage=test-elo');
+    await waitIdle(page);
+    const elo = page.getByLabel('Elo objetivo');
+    await expect(elo).toBeEnabled();
+    await expect(page.getByTestId('elo-hint')).toHaveCount(0);
+    // Five, not the twenty-seven the vocabulary has: a control the player can turn is a claim
+    // that turning it does something, and the claim is as wide as the sweep that backs it.
+    await expect(elo.locator('option')).toHaveText(['1200', '1500', '1800', '2100', '2400']);
+    await expect(elo).toHaveValue('1800');
   });
 
   test('plays a six-move game and reports the latency and the top five', async ({
