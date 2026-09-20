@@ -1,22 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import { SQUARE_TOKENS } from '../src/lib/chess-lm/squares';
 import {
+  ADAPTERS,
+  ADAPTER_BYTES,
   DEFAULT_BLOCK,
   ENCODER_BLOCK,
   ENCODER_SIZE_MB,
   ENCODER_STAGES,
+  adapterUrl,
+  adaptersFor,
   defaultEncoderId,
   defaultStageId,
+  findAdapter,
   encoderBlock,
   findEncoderStage,
   findStage,
   modelUrl,
+  NO_ADAPTER,
   selectableStages,
   stageBlock,
   totalSizeMb,
   STAGES,
   STAGE_SIZE_MB,
+  TEST_ADAPTER,
   TEST_ENCODER_STAGE,
+  TEST_LORA_STAGE,
   TEST_STAGE,
 } from '../src/lib/registry';
 
@@ -30,6 +38,10 @@ describe('stage registry', () => {
       'medium-fp16',
       'medium-int8',
       'medium-dpo-fp16',
+      'medium-elo-fp16',
+      'medium-elo-int8',
+      'medium-lora-fp16',
+      'medium-lora-int8',
     ]);
     expect(STAGES[0].kind).toBe('mock');
     expect(STAGES.slice(1).every((stage) => stage.kind === 'onnx')).toBe(true);
@@ -122,8 +134,9 @@ describe('encoder stages', () => {
     for (const stage of ENCODER_STAGES) {
       expect(stage.sizeMb).toBe(ENCODER_SIZE_MB[stage.id as keyof typeof ENCODER_SIZE_MB]);
     }
-    expect(ENCODER_SIZE_MB['encoder-fp16']).toBe(75);
-    expect(ENCODER_SIZE_MB['encoder-int8']).toBe(41);
+    // Measured on the published files, not estimated: 78 745 459 and 43 393 427 bytes.
+    expect(ENCODER_SIZE_MB['encoder-fp16']).toBe(79);
+    expect(ENCODER_SIZE_MB['encoder-int8']).toBe(43);
     expect(ENCODER_SIZE_MB['encoder-fp16']).toBeGreaterThan(ENCODER_SIZE_MB['encoder-int8']);
   });
 
@@ -158,9 +171,48 @@ describe('encoder stages', () => {
   });
 
   it('adds the two downloads up for the "both loaded" line', () => {
-    expect(totalSizeMb(findStage('small-fp16'), findEncoderStage('encoder-fp16'))).toBe(150);
-    expect(totalSizeMb(findStage('small-int8'), findEncoderStage('encoder-int8'))).toBe(82);
+    expect(totalSizeMb(findStage('small-fp16'), findEncoderStage('encoder-fp16'))).toBe(158);
+    expect(totalSizeMb(findStage('small-int8'), findEncoderStage('encoder-int8'))).toBe(86);
     expect(totalSizeMb(TEST_STAGE, TEST_ENCODER_STAGE)).toBe(0.3);
     expect(totalSizeMb(undefined, undefined)).toBe(0);
+  });
+});
+
+describe('style adapters', () => {
+  it('offers none for a stage whose graph does not take the factors', () => {
+    expect(adaptersFor(TEST_STAGE)).toEqual([]);
+    for (const stage of STAGES) {
+      if (!stage.adaptable) expect(adaptersFor(stage)).toEqual([]);
+    }
+  });
+
+  it('offers only adapters trained for the stage they are shown on', () => {
+    // An adapter is a correction to *these* weights, so the same file over another checkpoint is
+    // noise. The list is the cheap half of that check; the worker's length check is the other.
+    const offered = adaptersFor(TEST_LORA_STAGE);
+    expect(offered).toHaveLength(1);
+    expect(offered[0].id).toBe(TEST_ADAPTER.id);
+    for (const adapter of ADAPTERS) {
+      for (const stage of adapter.stages) {
+        expect(findStage(stage)?.adaptable, `${adapter.id} on ${stage}`).toBe(true);
+      }
+    }
+  });
+
+  it('serves the published adapters from the Hub and the toy one from this origin', () => {
+    expect(adapterUrl(ADAPTERS[0])).toBe(
+      `https://huggingface.co/${ADAPTERS[0].repo}/resolve/main/web/adapter.bin`,
+    );
+    expect(adapterUrl(TEST_ADAPTER)).toBe('/test/toy-lora.bin');
+  });
+
+  it('answers null for no adapter and for anything unknown', () => {
+    expect(findAdapter(NO_ADAPTER)).toBeNull();
+    expect(findAdapter('lora-nf3')).toBeNull();
+    expect(findAdapter('lora-e4')?.repo).toBe('chorcat/rukh-lora-e4');
+  });
+
+  it('declares the measured size of an adapter in one place', () => {
+    for (const adapter of ADAPTERS) expect(adapter.sizeBytes).toBe(ADAPTER_BYTES);
   });
 });

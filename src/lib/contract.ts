@@ -22,7 +22,27 @@ export interface ModelContract {
   block: number;
   /** Width of the logits vector, which must equal the tokenizer's vocabulary size. */
   vocab: number;
+  /** Shape of the LoRA factors the graph takes, when it takes them; `null` when it does not. */
+  adapter: AdapterShape | null;
 }
+
+/**
+ * The two tensors a style-swappable graph is fed on every call, and how many floats they are.
+ *
+ * This is the one piece of the adapter format the browser does **not** have to be told: the
+ * exporter declares `lora_a` and `lora_b` with fixed shapes, so the file itself says what an
+ * adapter for it must look like. A downloaded buffer of the wrong length is then a mismatch the
+ * page can name instead of a silent misread of somebody else's adapter.
+ */
+export interface AdapterShape {
+  a: number[];
+  b: number[];
+  /** `prod(a) + prod(b)`: the float32 count of a valid adapter file for this graph. */
+  floats: number;
+}
+
+/** Inputs a graph exported with `rukh export --adapter-inputs` adds, in the order it takes them. */
+export const ADAPTER_INPUTS = ['lora_a', 'lora_b'] as const;
 
 /** The part of ORT's `InferenceSession.ValueMetadata` this check needs; inputs and outputs. */
 export interface OutputMetadata {
@@ -79,6 +99,49 @@ export function lastFixedDim(
   return typeof last === 'number' && Number.isInteger(last) && last > 0 ? last : null;
 }
 
+/**
+ * The shape of the LoRA factors this graph takes, or `null` when it takes none.
+ *
+ * A graph that declares the inputs but not their size cannot be fed at all — there is nothing to
+ * build the zero adapter from — so that case throws rather than pretending the stage is ordinary.
+ */
+export function readAdapterShape(session: SessionLike): AdapterShape | null {
+  const inputs = session.inputNames ?? [];
+  const present = ADAPTER_INPUTS.filter((name) => inputs.includes(name));
+  if (present.length === 0) return null;
+  if (present.length !== ADAPTER_INPUTS.length) {
+    throw new Error(
+      `El modelo declara ${present.join(' y ')} pero no ${ADAPTER_INPUTS.filter(
+        (name) => !present.includes(name),
+      ).join(' y ')}: no es un fichero con adaptadores intercambiables.`,
+    );
+  }
+  const shapes = ADAPTER_INPUTS.map((name) => fixedShape(session.inputMetadata, name));
+  if (shapes.some((shape) => shape === null)) {
+    throw new Error(
+      'El modelo toma los factores de LoRA pero no declara su tamaño, así que no se puede ' +
+        'construir el adaptador vacío. Borra los modelos descargados y vuelve a intentarlo.',
+    );
+  }
+  const [a, b] = shapes as [number[], number[]];
+  return { a, b, floats: product(a) + product(b) };
+}
+
+/** A fully numeric shape for one named value, or `null` when any axis is symbolic or missing. */
+export function fixedShape(
+  metadata: readonly OutputMetadata[] | undefined,
+  name: string,
+): number[] | null {
+  const shape = metadata?.find((entry) => entry.name === name)?.shape;
+  if (!shape || shape.length === 0) return null;
+  const dims = shape.map((dim) => (typeof dim === 'number' && Number.isInteger(dim) ? dim : -1));
+  return dims.some((dim) => dim <= 0) ? null : dims;
+}
+
+function product(dims: readonly number[]): number {
+  return dims.reduce((total, dim) => total * dim, 1);
+}
+
 /** Throws with a message a player can read when the logits are not the tokenizer's width. */
 export function assertVocab(width: number, expected: number, source: string): void {
   if (width === expected) return;
@@ -105,7 +168,7 @@ export function readContract(
   }
   const declared = declaredVocab(session);
   if (declared !== null) assertVocab(declared, expectedVocab, DECLARED_SOURCE);
-  return { block, vocab: declared ?? expectedVocab };
+  return { block, vocab: declared ?? expectedVocab, adapter: readAdapterShape(session) };
 }
 
 // ------------------------------------------------------------------

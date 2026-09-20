@@ -22,12 +22,15 @@ import { firstLegalMove, type Opponent } from '../lib/opponent';
 import { parseQuery } from '../lib/query';
 import type { ModelContract } from '../lib/contract';
 import {
+  adapterUrl,
   encoderBlock,
+  findAdapter,
   findEncoderStage,
   findStage,
   modelUrl,
   stageBlock,
   ENCODER_STAGES,
+  NO_ADAPTER,
   STAGES,
   type Stage,
 } from '../lib/registry';
@@ -93,6 +96,16 @@ const topK = signal<number>(DEFAULT_SAMPLE.topK ?? 20);
 const maskIllegal = signal(true);
 const showArrows = signal(false);
 const elo = signal(1800);
+
+/**
+ * The style adapter loaded into the live session, and whether one is on its way.
+ *
+ * `NO_ADAPTER` is not "the feature is off": the graph still takes its two factors and is fed
+ * zeros, which is the base model exactly. So switching styles never rebuilds the session and
+ * never re-downloads the model — it uploads 1.6 MB and the next move comes out different.
+ */
+const adapter = signal<string>(NO_ADAPTER);
+const adapterBusy = signal(false);
 
 /** The evaluation bar: its own stage, its own consent, its own worker. */
 const encoderStage = signal<string>(ENCODER_STAGES[0].id);
@@ -282,7 +295,7 @@ async function load() {
     fallbackReason.value = ready.fallbackReason ?? null;
     loadMs.value = ready.loadMs;
     context.value = ready.block;
-    contract.value = { block: ready.block, vocab: ready.vocab };
+    contract.value = { block: ready.block, vocab: ready.vocab, adapter: null };
     status.value = 'ready';
     void settle();
   } catch (cause) {
@@ -370,9 +383,44 @@ async function evaluatePosition(state: GameState) {
   }
 }
 
+/**
+ * Loads a style adapter into the live session, or clears it.
+ *
+ * The signal is set to what actually took, not to what was clicked: a failed download has to
+ * leave the selector showing the style the model is really playing with, or the page would be
+ * claiming a style the weights know nothing about.
+ */
+async function chooseAdapter(id: string): Promise<void> {
+  if (id === adapter.value || adapterBusy.value) return;
+  const entry = findAdapter(id);
+  if (!decoder || status.value !== 'ready') return;
+  adapterBusy.value = true;
+  error.value = null;
+  const previous = adapter.value;
+  try {
+    await decoder.adapter(
+      {
+        adapter: entry?.id ?? '',
+        url: entry ? adapterUrl(entry) : null,
+        sizeBytes: entry?.sizeBytes ?? 0,
+      },
+      (update) => (progress.value = update),
+    );
+    adapter.value = entry ? entry.id : NO_ADAPTER;
+  } catch (cause) {
+    adapter.value = previous;
+    error.value = cause instanceof Error ? cause.message : String(cause);
+  } finally {
+    adapterBusy.value = false;
+    progress.value = null;
+  }
+}
+
 function chooseStage(id: string) {
   if (id === stage.value) return;
   stage.value = id;
+  adapter.value = NO_ADAPTER;
+  adapterBusy.value = false;
   top5.value = [];
   waterfall.value = [];
   illegal.value = null;
@@ -489,7 +537,10 @@ export default function App() {
           fallbackReason={fallbackReason}
           error={error}
           elo={elo}
+          adapter={adapter}
+          adapterBusy={adapterBusy}
           onStage={chooseStage}
+          onAdapter={(id) => void chooseAdapter(id)}
           onColor={chooseColor}
           onPlay={() => void load()}
           onClearCache={clearCache}

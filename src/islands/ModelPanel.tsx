@@ -2,11 +2,14 @@ import type { Signal } from '@preact/signals';
 import { useEffect, useState } from 'preact/hooks';
 import type { Color, GameState } from '../lib/game';
 import {
+  adaptersFor,
   findEncoderStage,
   findStage,
   totalSizeMb,
+  ELO_TARGETS,
   ENCODER_STAGES,
   MODEL_LICENSE,
+  NO_ADAPTER,
   selectableStages,
   STAGES,
 } from '../lib/registry';
@@ -31,7 +34,12 @@ interface Props {
   fallbackReason: Signal<string | null>;
   error: Signal<string | null>;
   elo: Signal<number>;
+  /** Style adapter loaded into the live session, or `NO_ADAPTER`. */
+  adapter: Signal<string>;
+  /** True while a style adapter is being downloaded and installed. */
+  adapterBusy: Signal<boolean>;
   onStage: (id: string) => void;
+  onAdapter: (id: string) => void;
   onColor: (color: Color) => void;
   onPlay: () => void;
   onClearCache: () => Promise<ClearCacheResult>;
@@ -58,9 +66,6 @@ const CACHE_LABEL: Record<CacheState, string> = {
 
 /** How long the button keeps its answer before offering itself again. */
 const CACHE_RESET_MS = 4000;
-
-/** Elo targets offered once the conditioned checkpoints land (M4). */
-const ELO_TARGETS = Array.from({ length: 13 }, (_, i) => 1200 + i * 100);
 
 const BACKEND_LABEL: Record<Backend, string> = { webgpu: 'WebGPU', wasm: 'WASM' };
 
@@ -105,7 +110,10 @@ export default function ModelPanel({
   fallbackReason,
   error,
   elo,
+  adapter,
+  adapterBusy,
   onStage,
+  onAdapter,
   onColor,
   onPlay,
   onClearCache,
@@ -127,6 +135,7 @@ export default function ModelPanel({
   const encoderPhase = encoderStatus.value;
   const encoderDownload = encoderProgress.value;
   const combined = combinedSize(phase, current, encoder);
+  const styles = adaptersFor(current);
   const [cache, setCache] = useState<CacheState>('idle');
 
   // The answer is temporary: without this the button would keep claiming "Modelos borrados"
@@ -164,7 +173,7 @@ export default function ModelPanel({
           class="select"
           value={String(elo.value)}
           disabled={!current.eloConditioned}
-          title={current.eloConditioned ? undefined : 'Condicionar por Elo llega en M4'}
+          title={current.eloConditioned ? undefined : 'Esta etapa no está condicionada por Elo'}
           onChange={(event) =>
             (elo.value = Number((event.currentTarget as HTMLSelectElement).value))
           }
@@ -177,9 +186,35 @@ export default function ModelPanel({
         </select>
         {!current.eloConditioned ? (
           <span class="caption" data-testid="elo-hint">
-            Condicionar por Elo llega en M4
+            Solo la etapa condicionada responde al Elo objetivo
           </span>
         ) : null}
+      </label>
+      <label class="model__field">
+        <span class="caption">Estilo</span>
+        <select
+          class="select"
+          data-testid="adapter"
+          value={adapter.value}
+          disabled={styles.length === 0 || phase !== 'ready' || adapterBusy.value}
+          title={styles.length === 0 ? 'Esta etapa no admite adaptadores de estilo' : undefined}
+          onChange={(event) => onAdapter((event.currentTarget as HTMLSelectElement).value)}
+        >
+          <option value={NO_ADAPTER}>Sin estilo</option>
+          {styles.map((entry) => (
+            <option key={entry.id} value={entry.id}>
+              {entry.label} · {megabytes(entry.sizeBytes)} MB
+            </option>
+          ))}
+        </select>
+        <span class="caption" data-testid="adapter-hint">
+          {styles.length === 0
+            ? 'Solo la etapa con adaptadores intercambiables cambia de estilo'
+            : phase !== 'ready'
+              ? 'Carga el modelo y podrás cambiarle el estilo sin descargar nada más'
+              : (styles.find((entry) => entry.id === adapter.value)?.hint ??
+                'Los pesos no se tocan: el estilo son 1,6 MB aparte')}
+        </span>
       </label>
 
       {phase === 'mock' ? (

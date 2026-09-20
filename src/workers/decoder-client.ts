@@ -2,7 +2,13 @@
 // literal lives here, at the call site, because that is the only shape Vite recognises to emit
 // the worker as its own chunk (`tests/worker-chunk.test.ts` guards it). The request/answer
 // plumbing is in `rpc.ts`, shared with the encoder's client.
-import type { Backend, InitRequest, ProgressMessage, ReadyMessage } from '../lib/worker-protocol';
+import type {
+  AdapterMessage,
+  Backend,
+  InitRequest,
+  ProgressMessage,
+  ReadyMessage,
+} from '../lib/worker-protocol';
 import { createRpc, type WorkerLike } from './rpc';
 
 export interface LoadReport {
@@ -14,6 +20,8 @@ export interface LoadReport {
   block: number;
   /** Width of the logits the model answers with, already checked against the tokenizer. */
   vocab: number;
+  /** Floats a style adapter for this file has; 0 when the graph takes none. */
+  adapterFloats: number;
 }
 
 /** What `init` needs to know about a stage; the worker's `id` is added by `send`. */
@@ -29,6 +37,16 @@ export interface Decoder {
   init(request: LoadRequest, onProgress?: (progress: ProgressMessage) => void): Promise<LoadReport>;
   /** Logits of the last step for a prompt already cropped to the context window. */
   logits(ids: number[]): Promise<LogitsReport>;
+  /**
+   * Loads a style adapter into the live session, or clears it with `url: null`.
+   *
+   * Only stages whose graph takes the factors as inputs accept this; the others answer with an
+   * error rather than quietly playing without the style the player asked for.
+   */
+  adapter(
+    request: { adapter: string; url: string | null; sizeBytes: number },
+    onProgress?: (progress: ProgressMessage) => void,
+  ): Promise<AdapterMessage>;
   /** Releases the session and terminates the worker; the handle is unusable afterwards. */
   dispose(): Promise<void>;
 }
@@ -54,7 +72,11 @@ export function createDecoder(worker: WorkerLike = spawn()): Decoder {
         loadMs: ready.loadMs,
         block: ready.block,
         vocab: ready.vocab,
+        adapterFloats: ready.adapterFloats ?? 0,
       };
+    },
+    adapter(request, onProgress) {
+      return rpc.send<AdapterMessage>({ type: 'adapter', ...request }, onProgress);
     },
     async logits(ids) {
       const answer = await rpc.send<{ data: Float32Array; inferMs: number }>({

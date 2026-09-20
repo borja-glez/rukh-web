@@ -34,6 +34,7 @@ describe('worker protocol', () => {
       loadMs: 12,
       block: 200,
       vocab: 2030,
+      adapterFloats: 0,
     };
     expect(asResponse(ready)).toBe(ready);
     expect(asResponse({ type: 'progress', id: 1, loaded: 2, total: 4 })).not.toBeNull();

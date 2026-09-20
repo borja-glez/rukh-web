@@ -15,6 +15,15 @@ export interface Stage {
   /** True once the stage is trained with the Elo conditioning tokens (M4). */
   eloConditioned?: boolean;
   /**
+   * True when the stage's ONNX takes its LoRA factors as inputs, so styles can be swapped.
+   *
+   * It is not a different model: fed an adapter of zeros the graph computes exactly what the
+   * plain export computes, which is checked on both sides (`tests/unit/test_export_adapter.py`
+   * in `rukh`, `readAdapterShape` here). What the flag really says is that the file declares
+   * `lora_a` and `lora_b`, so the worker has to feed them on every call.
+   */
+  adaptable?: boolean;
+  /**
    * Context window the stage was trained with (`DecoderConfig.block`). It lives here because ORT
    * Web does not expose the `rukh_block` metadata the exporter writes into the file, so the only
    * place the browser can learn it is the registry; `DEFAULT_BLOCK` when a stage omits it.
@@ -36,18 +45,111 @@ export function stageBlock(stage: Stage): number {
  * megabytes, so an estimate that drifts from the file is a promise the page does not keep. Read
  * them back with `python -c "import os; print(os.path.getsize(...))"` whenever a stage is
  * re-exported: `small` and the encoder both changed size when their weights did.
+ *
+ * Every number here was re-read from the staged `onnx` folders on 2026-09-20 and every
+ * one of them was wrong -- by 6 to 10 MB, always low, because they had been carried over from the
+ * plan's estimates and never corrected. The consent step had been under-promising every download
+ * since P2.
  */
 export const STAGE_SIZE_MB = {
-  'tiny-int8': 7,
-  'small-fp16': 75,
-  'small-int8': 41,
-  'medium-fp16': 221,
-  'medium-int8': 116,
-  'medium-dpo-fp16': 221,
+  'tiny-int8': 8,
+  'small-fp16': 79,
+  'small-int8': 43,
+  'medium-fp16': 231,
+  'medium-int8': 122,
+  'medium-dpo-fp16': 231,
+  'medium-elo-fp16': 231,
+  'medium-elo-int8': 122,
+  // The swappable export is 438 KB bigger than the ordinary one -- the cost of a graph that takes
+  // its LoRA factors as inputs is 0.19 % of the file, which is the whole argument for doing it.
+  'medium-lora-fp16': 232,
+  'medium-lora-int8': 122,
 } as const;
 
 /** Licence of every published Rukh model; shown before anything is downloaded. */
 export const MODEL_LICENSE = 'Apache-2.0';
+
+/**
+ * Elo headers the "juega como" selector offers, and the reason it is a short list.
+ *
+ * These are the conditions that were actually *measured*, one full run of the suite each
+ * (`rukh eval sweep`, M4). The vocabulary has twenty-seven of them and the model will answer any,
+ * but offering twenty-seven would promise twenty-seven measurements and there are six. A control
+ * a player turns is a claim that turning it does something, and the claim is only as wide as the
+ * evidence behind it.
+ */
+export const ELO_TARGETS = [1200, 1500, 1800, 2000, 2100, 2400] as const;
+
+/** The header a conditioned stage starts at: the one every published number was read at. */
+export const DEFAULT_ELO = 1800;
+
+/**
+ * A style adapter: 1.6 MB of LoRA factors that change how the model opens and nothing else.
+ *
+ * They are offered only on stages marked `adaptable`, and they are tied to the base model they
+ * were trained on — an adapter is a correction to specific weights, so the same file over another
+ * checkpoint is noise. The worker refuses one whose size does not match what the graph declares,
+ * which is the cheap half of that check; the other half is that this list only ever names
+ * adapters of the stage they sit next to.
+ */
+export interface Adapter {
+  id: string;
+  label: string;
+  /** What it does, in the words a player would use. */
+  hint: string;
+  repo: string;
+  /** Path of the flat float32 file inside the repo (`web/adapter.bin`). */
+  file: string;
+  /** Measured, like `STAGE_SIZE_MB`: the worker checks the real length against the graph. */
+  sizeBytes: number;
+  /** Stage ids this adapter may be loaded into. */
+  stages: readonly string[];
+}
+
+/** Adapter sizes in bytes, **measured** on the published files. */
+export const ADAPTER_BYTES = 1_572_864;
+
+export const NO_ADAPTER = 'none';
+
+export const ADAPTERS: Adapter[] = [
+  {
+    id: 'lora-e4',
+    label: 'Abre 1. e4',
+    hint: 'Abre con el peón de rey el 99,9 % de las veces',
+    repo: 'chorcat/rukh-lora-e4',
+    file: 'web/adapter.bin',
+    sizeBytes: ADAPTER_BYTES,
+    stages: ['medium-lora-fp16', 'medium-lora-int8'],
+  },
+  {
+    id: 'lora-d4',
+    label: 'Abre 1. d4',
+    hint: 'Abre con el peón de dama el 99,9 % de las veces',
+    repo: 'chorcat/rukh-lora-d4',
+    file: 'web/adapter.bin',
+    sizeBytes: ADAPTER_BYTES,
+    stages: ['medium-lora-fp16', 'medium-lora-int8'],
+  },
+];
+
+/** The adapters offered for one stage; empty for a stage that cannot take them. */
+export function adaptersFor(stage: Stage): Adapter[] {
+  if (!stage.adaptable) return [];
+  const offered = stage.id === 'test-lora' ? [TEST_ADAPTER] : ADAPTERS;
+  return offered.filter((adapter) => adapter.stages.includes(stage.id));
+}
+
+/** One adapter by id, or `null` for `NO_ADAPTER` and for anything unknown. */
+export function findAdapter(id: string): Adapter | null {
+  if (id === TEST_ADAPTER.id) return TEST_ADAPTER;
+  return ADAPTERS.find((adapter) => adapter.id === id) ?? null;
+}
+
+/** Hub URL of an adapter's browser file, or the same-origin path of the toy one. */
+export function adapterUrl(adapter: Adapter): string {
+  if (!adapter.repo || !adapter.file) return '/test/toy-lora.bin';
+  return hubUrl(adapter.repo, adapter.file);
+}
 
 /** Model stages offered by the demo. `mock` stays first: it is what `?mock=1` falls back to. */
 export const STAGES: Stage[] = [
@@ -109,6 +211,53 @@ export const STAGES: Stage[] = [
     sizeMb: STAGE_SIZE_MB['medium-dpo-fp16'],
     block: DEFAULT_BLOCK,
   },
+  // `medium` fine-tuned on an Elo-balanced corpus (M4). The only stages that answer the "juega
+  // como" selector: the twelve headers below 1800 had never received a gradient until this run,
+  // so on every other stage the control would be asking the model to read noise.
+  {
+    id: 'medium-elo-fp16',
+    label: 'Rukh medium + Elo (fp16)',
+    kind: 'onnx',
+    repo: 'chorcat/rukh-medium-elo',
+    file: 'onnx/model-fp16.onnx',
+    sizeMb: STAGE_SIZE_MB['medium-elo-fp16'],
+    block: DEFAULT_BLOCK,
+    eloConditioned: true,
+  },
+  {
+    id: 'medium-elo-int8',
+    label: 'Rukh medium + Elo (int8)',
+    kind: 'onnx',
+    repo: 'chorcat/rukh-medium-elo',
+    file: 'onnx/model-int8.onnx',
+    sizeMb: STAGE_SIZE_MB['medium-elo-int8'],
+    block: DEFAULT_BLOCK,
+    eloConditioned: true,
+  },
+  // The same weights as `medium`, exported with the LoRA factors as inputs of the graph, in a
+  // repository of its own. A separate stage and not a replacement because the file is a separate
+  // download: somebody who already has `medium-fp16` cached should not lose it to a feature they
+  // may never use, and fed an adapter of zeros this graph computes exactly what that one does.
+  {
+    id: 'medium-lora-fp16',
+    label: 'Rukh medium + estilo (fp16)',
+    kind: 'onnx',
+    repo: 'chorcat/rukh-medium-lora',
+    file: 'onnx/model-fp16.onnx',
+    sizeMb: STAGE_SIZE_MB['medium-lora-fp16'],
+    block: DEFAULT_BLOCK,
+    adaptable: true,
+  },
+  {
+    id: 'medium-lora-int8',
+    label: 'Rukh medium + estilo (int8)',
+    kind: 'onnx',
+    repo: 'chorcat/rukh-medium-lora',
+    file: 'onnx/model-int8.onnx',
+    sizeMb: STAGE_SIZE_MB['medium-lora-int8'],
+    block: DEFAULT_BLOCK,
+    adaptable: true,
+  },
 ];
 
 /**
@@ -145,8 +294,8 @@ export const ENCODER_BLOCK = 69;
  * Download sizes in MB of the encoder exports, measured like `STAGE_SIZE_MB`.
  */
 export const ENCODER_SIZE_MB = {
-  'encoder-fp16': 75,
-  'encoder-int8': 41,
+  'encoder-fp16': 79,
+  'encoder-int8': 43,
 } as const;
 
 export const ENCODER_STAGES: Stage[] = [
@@ -186,8 +335,54 @@ export const TEST_ENCODER_STAGE: Stage = {
   block: ENCODER_BLOCK,
 };
 
+/**
+ * The same toy graph, flagged as conditioned, so the E2E suite can walk the *enabled* path of the
+ * Elo selector without downloading 221 MB from the Hub.
+ *
+ * The flag says what the registry claims about a stage, and what is under test is the wiring that
+ * reads it: the control is enabled, the hint disappears, and the chosen header reaches the
+ * tokenizer. Whether the weights behind it were really trained on the Elo axis is a question for
+ * `rukh eval sweep`, and no browser test could answer it anyway.
+ */
+export const TEST_ELO_STAGE: Stage = {
+  ...TEST_STAGE,
+  id: 'test-elo',
+  label: 'ONNX de juguete, condicionado (pruebas)',
+  eloConditioned: true,
+};
+
+/**
+ * A toy decoder exported with its LoRA factors as inputs, and a toy adapter for it.
+ *
+ * Both are written by `rukh/scripts/make_toy_web_models.py` with the same functions that write the
+ * published files, so the graph really does declare `lora_a` and `lora_b` and the buffer really is
+ * the length that graph asks for. What the E2E can then check is the only thing a browser test
+ * ever could: that loading the adapter changes the move and clearing it puts the old one back.
+ * The adapter is not trained — it is a seeded `B` — because a style is a claim about a corpus and
+ * this file has none.
+ */
+export const TEST_LORA_STAGE: Stage = {
+  ...TEST_STAGE,
+  id: 'test-lora',
+  label: 'ONNX de juguete con adaptadores (pruebas)',
+  url: '/test/toy-decoder-lora.onnx',
+  adaptable: true,
+};
+
+export const TEST_ADAPTER: Adapter = {
+  id: 'test-lora',
+  label: 'Estilo de juguete',
+  hint: 'Adaptador de prueba: cambia la jugada y no significa nada',
+  repo: '',
+  file: '',
+  sizeBytes: 256,
+  stages: [TEST_LORA_STAGE.id],
+};
+
 export function findStage(id: string): Stage | undefined {
   if (id === TEST_STAGE.id) return TEST_STAGE;
+  if (id === TEST_ELO_STAGE.id) return TEST_ELO_STAGE;
+  if (id === TEST_LORA_STAGE.id) return TEST_LORA_STAGE;
   return STAGES.find((stage) => stage.id === id);
 }
 
@@ -230,7 +425,12 @@ export function modelUrl(stage: Stage): string {
   if (!stage.repo || !stage.file) {
     throw new Error(`stage ${stage.id} has no model file`);
   }
-  return `https://huggingface.co/${stage.repo}/resolve/main/${stage.file}`;
+  return hubUrl(stage.repo, stage.file);
+}
+
+/** One file of one Hub repository; the only shape of Hub URL the demo ever builds. */
+export function hubUrl(repo: string, file: string): string {
+  return `https://huggingface.co/${repo}/resolve/main/${file}`;
 }
 
 /** The stages the selector offers: the registry plus `current` when it is not part of it. */

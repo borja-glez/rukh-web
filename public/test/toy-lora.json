@@ -1,0 +1,25 @@
+{
+  "format": "rukh-lora-web-1",
+  "dtype": "float32",
+  "order": [
+    "lora_a",
+    "lora_b"
+  ],
+  "shape_a": [
+    1,
+    2,
+    2,
+    8
+  ],
+  "shape_b": [
+    1,
+    2,
+    8,
+    2
+  ],
+  "module": "attn.qkv",
+  "r": 2,
+  "scale_applied": 2.0,
+  "base_model": null,
+  "bytes": 256
+}
