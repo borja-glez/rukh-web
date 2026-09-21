@@ -3,6 +3,7 @@ import { useEffect } from 'preact/hooks';
 import {
   applyMove,
   canUndo,
+  fromFen,
   newGame,
   toPgn,
   undoPair,
@@ -19,7 +20,7 @@ import {
   type Timings,
 } from '../lib/model';
 import { firstLegalMove, type Opponent } from '../lib/opponent';
-import { parseQuery } from '../lib/query';
+import { parseQuery, MODES, type Mode } from '../lib/query';
 import type { ModelContract } from '../lib/contract';
 import {
   adapterUrl,
@@ -39,8 +40,10 @@ import { isCached } from '../lib/download';
 import { fenToTokens, UciTokenizer } from '../lib/chess-lm';
 import { createDecoder, type Decoder } from '../workers/decoder-client';
 import { createEncoder, type Encoder } from '../workers/encoder-client';
+import Arena from './Arena';
 import Board from './Board';
 import EvalBar, { supersedes, type Evaluation } from './EvalBar';
+import Puzzles from './Puzzles';
 import ModelPanel from './ModelPanel';
 import More from './More';
 import MoveList from './MoveList';
@@ -69,6 +72,12 @@ export interface ClearCacheResult {
 const game = signal<GameState>(newGame());
 const human = signal<Color>('w');
 const stage = signal<string>(STAGES[0].id);
+/** What the screen is doing; the arena and the puzzles lock the board (nobody moves by hand). */
+const mode = signal<Mode>('play');
+const locked = computed(() => mode.value !== 'play');
+/** The arena's second stage when the query named one (`?vs=`). */
+const arenaB = signal<string | null>(null);
+const MODE_LABELS: Record<Mode, string> = { play: 'Jugar', arena: 'Arena', puzzles: 'Puzles' };
 /** True while the opponent is thinking. */
 const thinking = signal(false);
 /** True while the board animates a turn: colour changes wait for it. */
@@ -154,8 +163,14 @@ function record(proposal: Proposal) {
   waterfall.value = [...waterfall.value, proposal.timings].slice(-WATERFALL_LENGTH);
 }
 
-/** The mock opponent, or the decoder once its session is ready. */
-async function pickMove(state: GameState): Promise<Move | null> {
+/**
+ * The mock opponent, or the decoder once its session is ready. `header` overrides the Elo the
+ * prompt is written with: the puzzles carry their players' own ratings, as the harness does.
+ */
+async function pickMove(
+  state: GameState,
+  header?: { whiteElo: number; blackElo: number },
+): Promise<Move | null> {
   if (status.value === 'mock') {
     const opponent: Opponent = firstLegalMove;
     return opponent.pick(state.fen);
@@ -167,10 +182,12 @@ async function pickMove(state: GameState): Promise<Move | null> {
     topK: topK.value,
     maskIllegal: maskIllegal.value,
   };
+  const whiteElo = header?.whiteElo ?? elo.value;
+  const blackElo = header?.blackElo ?? elo.value;
   const proposal = await proposeMove(source, {
     state,
-    whiteElo: elo.value,
-    blackElo: elo.value,
+    whiteElo,
+    blackElo,
     options,
     tokenizer,
     context: context.value,
@@ -187,8 +204,8 @@ async function pickMove(state: GameState): Promise<Move | null> {
   if (proposal.masked) return null;
   const rescue = await proposeMove(source, {
     state,
-    whiteElo: elo.value,
-    blackElo: elo.value,
+    whiteElo,
+    blackElo,
     options: { ...options, maskIllegal: true },
     tokenizer,
     context: context.value,
@@ -198,6 +215,8 @@ async function pickMove(state: GameState): Promise<Move | null> {
 }
 
 async function settle() {
+  // The arena and the puzzles drive the board themselves; the play loop stays out of it.
+  if (mode.value !== 'play') return;
   const current = game.value;
   if (!opponentToMove(current) || thinking.value) return;
   if (status.value !== 'mock' && status.value !== 'ready') return;
@@ -461,6 +480,16 @@ function stageLabel(): string {
   return currentStage().label;
 }
 
+/** Switches between playing, the arena and the puzzles; the board starts over each time. */
+function chooseMode(next: Mode) {
+  if (next === mode.value) return;
+  mode.value = next;
+  dropEvaluation();
+  game.value = newGame();
+  illegal.value = null;
+  if (next === 'play') void settle();
+}
+
 function exportPgn(): string {
   const white = human.value === 'w' ? HUMAN_LABEL : stageLabel();
   const black = human.value === 'b' ? HUMAN_LABEL : stageLabel();
@@ -472,6 +501,11 @@ export default function App() {
     const query = parseQuery(window.location.search);
     stage.value = query.stage;
     encoderStage.value = query.encoder;
+    mode.value = query.mode;
+    arenaB.value = query.vs;
+    // A shared position (`?fen=`) starts the game there, with no history behind it: the model
+    // plays from a shorter prompt than it was trained on, which the model card says out loud.
+    if (query.fen && query.mode === 'play') game.value = fromFen(query.fen);
     status.value = currentStage().kind === 'mock' ? 'mock' : 'consent';
     // A reload finds the weights in the Cache API. Asking again would be asking about a
     // download that will not happen, so the model just loads.
@@ -522,45 +556,82 @@ export default function App() {
           top5={top5}
           arrows={showArrows}
           onMove={playHuman}
+          locked={locked}
         />
         <EvalBar evaluation={evaluation} />
       </div>
       <aside class="panel" data-testid="panel" aria-label="Modelo y jugadas">
-        <ModelPanel
-          game={game}
-          human={human}
-          stage={stage}
-          busy={busy}
-          status={status}
-          progress={progress}
-          backend={backend}
-          fallbackReason={fallbackReason}
-          error={error}
-          elo={elo}
-          adapter={adapter}
-          adapterBusy={adapterBusy}
-          onStage={chooseStage}
-          onAdapter={(id) => void chooseAdapter(id)}
-          onColor={chooseColor}
-          onPlay={() => void load()}
-          onClearCache={clearCache}
-          encoderStage={encoderStage}
-          encoderStatus={encoderStatus}
-          encoderProgress={encoderProgress}
-          encoderBackend={encoderBackend}
-          encoderError={encoderError}
-          onEncoder={() => void loadEncoder()}
-          onEncoderOff={() => void stopEncoder()}
-        />
-        <MoveList
-          game={game}
-          human={human}
-          busy={busy}
-          illegal={illegal}
-          onUndo={undo}
-          onNewGame={startNewGame}
-          onExport={exportPgn}
-        />
+        <nav class="modes" aria-label="Modo" data-testid="modes">
+          {MODES.map((option) => (
+            <button
+              key={option}
+              type="button"
+              class="btn modes__item"
+              aria-pressed={mode.value === option}
+              data-mode={option}
+              onClick={() => chooseMode(option)}
+            >
+              {MODE_LABELS[option]}
+            </button>
+          ))}
+        </nav>
+        {mode.value === 'arena' ? (
+          <Arena
+            game={game}
+            mock={status.value === 'mock'}
+            initialA={stage.value}
+            initialB={arenaB.value}
+          />
+        ) : null}
+        {mode.value === 'puzzles' ? (
+          <Puzzles
+            game={game}
+            status={status}
+            stageLabel={stageLabel()}
+            sizeMb={currentStage().sizeMb}
+            onLoad={() => void load()}
+            pick={(state, header) => pickMove(state, header)}
+          />
+        ) : null}
+        {mode.value === 'play' ? (
+          <ModelPanel
+            game={game}
+            human={human}
+            stage={stage}
+            busy={busy}
+            status={status}
+            progress={progress}
+            backend={backend}
+            fallbackReason={fallbackReason}
+            error={error}
+            elo={elo}
+            adapter={adapter}
+            adapterBusy={adapterBusy}
+            onStage={chooseStage}
+            onAdapter={(id) => void chooseAdapter(id)}
+            onColor={chooseColor}
+            onPlay={() => void load()}
+            onClearCache={clearCache}
+            encoderStage={encoderStage}
+            encoderStatus={encoderStatus}
+            encoderProgress={encoderProgress}
+            encoderBackend={encoderBackend}
+            encoderError={encoderError}
+            onEncoder={() => void loadEncoder()}
+            onEncoderOff={() => void stopEncoder()}
+          />
+        ) : null}
+        {mode.value === 'play' ? (
+          <MoveList
+            game={game}
+            human={human}
+            busy={busy}
+            illegal={illegal}
+            onUndo={undo}
+            onNewGame={startNewGame}
+            onExport={exportPgn}
+          />
+        ) : null}
       </aside>
       <More
         temperature={temperature}

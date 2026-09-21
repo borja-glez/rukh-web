@@ -22,6 +22,11 @@ interface Props {
   arrows: Signal<boolean>;
   /** Applies the human move; returns false when it is rejected. */
   onMove: (move: Move) => boolean;
+  /**
+   * True in the modes where nobody moves by hand (the arena, the puzzles): input is refused
+   * without looking at whose turn it is, and the board says so with `data-locked`.
+   */
+  locked?: Signal<boolean>;
 }
 
 /**
@@ -40,7 +45,16 @@ const ARROW_MOVE = /^([a-h][1-8])([a-h][1-8])/;
  * import time), the sprites are served from /pieces and /extensions (copied by
  * scripts/copy-assets.mjs) and the theme lives in src/styles/board.css.
  */
-export default function Board({ game, human, thinking, turning, top5, arrows, onMove }: Props) {
+export default function Board({
+  game,
+  human,
+  thinking,
+  turning,
+  top5,
+  arrows,
+  onMove,
+  locked,
+}: Props) {
   const container = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -100,7 +114,9 @@ export default function Board({ game, human, thinking, turning, top5, arrows, on
         const state = game.value;
         switch (event.type) {
           case INPUT_EVENT_TYPE.moveInputStarted: {
-            if (thinking.value || state.over || state.turn !== human.value) return false;
+            if (locked?.value || thinking.value || state.over || state.turn !== human.value) {
+              return false;
+            }
             const targets = legalTargets(state, event.squareFrom);
             if (targets.length === 0) return false;
             clearTargets();
@@ -108,7 +124,7 @@ export default function Board({ game, human, thinking, turning, top5, arrows, on
             return true;
           }
           case INPUT_EVENT_TYPE.validateMoveInput: {
-            if (thinking.value) return false;
+            if (locked?.value || thinking.value) return false;
             const from = event.squareFrom;
             const to = event.squareTo ?? '';
             if (needsPromotion(state, from, to)) {
@@ -219,7 +235,7 @@ export default function Board({ game, human, thinking, turning, top5, arrows, on
       disposed = true;
       dispose?.();
     };
-  }, [game, human, thinking, turning, top5, arrows, onMove]);
+  }, [game, human, thinking, turning, top5, arrows, onMove, locked]);
 
   return (
     <div
@@ -227,6 +243,7 @@ export default function Board({ game, human, thinking, turning, top5, arrows, on
       data-testid="board"
       data-busy="true"
       data-thinking={thinking.value ? 'true' : 'false'}
+      data-locked={locked?.value ? 'true' : 'false'}
     >
       <div class="board__surface" ref={container} />
     </div>

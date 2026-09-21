@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { parseQuery } from '../src/lib/query';
+import { parseQuery, validFen } from '../src/lib/query';
+
+/** What every query carries when nothing asks for another mode, position or opponent. */
+const PLAIN = { mode: 'play', fen: null, vs: null } as const;
 
 describe('parseQuery', () => {
   it('?mock=1 forces mock', () => {
@@ -8,6 +11,7 @@ describe('parseQuery', () => {
       stage: 'mock',
       encoder: 'encoder-fp16',
       color: 'w',
+      ...PLAIN,
     });
     expect(parseQuery('?mock=1&stage=small-int8', 'small-fp16').stage).toBe('mock');
   });
@@ -18,6 +22,7 @@ describe('parseQuery', () => {
       stage: 'small-int8',
       encoder: 'encoder-int8',
       color: 'w',
+      ...PLAIN,
     });
   });
 
@@ -27,6 +32,7 @@ describe('parseQuery', () => {
       stage: 'tiny-int8',
       encoder: 'encoder-fp16',
       color: 'w',
+      ...PLAIN,
     });
   });
 
@@ -41,6 +47,7 @@ describe('parseQuery', () => {
       stage: 'mock',
       encoder: 'encoder-fp16',
       color: 'w',
+      ...PLAIN,
     });
   });
 
@@ -62,5 +69,22 @@ describe('parseQuery', () => {
   it('reads the colour', () => {
     expect(parseQuery('?color=b', 'mock').color).toBe('b');
     expect(parseQuery('?color=x', 'mock').color).toBe('w');
+  });
+
+  it('opens the arena or the puzzles from the query, and nothing else', () => {
+    expect(parseQuery('?mode=arena', 'mock').mode).toBe('arena');
+    expect(parseQuery('?mode=puzzles', 'mock').mode).toBe('puzzles');
+    expect(parseQuery('?mode=coach', 'mock').mode).toBe('play');
+    // The arena's second stage has to be a known stage; anything else is ignored.
+    expect(parseQuery('?mode=arena&vs=tiny-int8', 'mock').vs).toBe('tiny-int8');
+    expect(parseQuery('?mode=arena&vs=nope', 'mock').vs).toBeNull();
+  });
+
+  it('shares a position only when chess.js accepts it', () => {
+    const after = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
+    expect(parseQuery(`?fen=${encodeURIComponent(after)}`, 'mock').fen).toBe(after);
+    expect(parseQuery('?fen=not-a-position', 'mock').fen).toBeNull();
+    expect(validFen(null)).toBeNull();
+    expect(validFen('')).toBeNull();
   });
 });

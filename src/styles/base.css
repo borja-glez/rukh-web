@@ -679,3 +679,52 @@ select {
     max-width: none;
   }
 }
+
+/* Mode switch: play, arena, puzzles. Three equal buttons; the pressed one is the mode. */
+.modes {
+  display: flex;
+  gap: 1px;
+  padding: 1px;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.modes__item {
+  flex: 1;
+  min-height: 44px;
+  border: 0;
+}
+
+.arena__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.arena__summary dd {
+  margin: 4px 0 0;
+  font-size: 15px;
+}
+
+.arena__note,
+.puzzles__miss {
+  color: var(--ink-2);
+}
+
+.puzzles__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.puzzles__table th,
+.puzzles__table td {
+  padding: 6px 4px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+.puzzles__table th:not(:first-child),
+.puzzles__table td:not(:first-child) {
+  text-align: right;
+}

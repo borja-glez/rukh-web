@@ -56,22 +56,30 @@ Run `pnpm exec playwright install chromium` once before `pnpm e2e`.
 `src/lib/registry.ts` is the single list of what you can play against, `mock` first so `?mock=1`
 always has somewhere to fall back to:
 
-| Stage        | Label                | Where it comes from                          | Size   |
-| ------------ | -------------------- | -------------------------------------------- | ------ |
-| `mock`       | Primera jugada legal | no download, first legal move                | 0 MB   |
-| `tiny-int8`  | Rukh tiny (int8)     | `chorcat/rukh-tiny`, `onnx/model-int8.onnx`  | ~6 MB  |
-| `small-fp16` | Rukh small (fp16)    | `chorcat/rukh-small`, `onnx/model-fp16.onnx` | ~80 MB |
-| `small-int8` | Rukh small (int8)    | `chorcat/rukh-small`, `onnx/model-int8.onnx` | ~40 MB |
+| Stage              | Label                       | Where it comes from                             | Size   |
+| ------------------ | --------------------------- | ----------------------------------------------- | ------ |
+| `mock`             | Primera jugada legal        | no download, first legal move                   | 0 MB   |
+| `tiny-int8`        | Rukh tiny (int8)            | `chorcat/rukh-tiny`, `onnx/model-int8.onnx`     | 8 MB   |
+| `small-fp16`       | Rukh small (fp16)           | `chorcat/rukh-small`, `onnx/model-fp16.onnx`    | 79 MB  |
+| `small-int8`       | Rukh small (int8)           | `chorcat/rukh-small`, `onnx/model-int8.onnx`    | 43 MB  |
+| `medium-fp16`      | Rukh medium (fp16)          | `chorcat/rukh-medium`, `onnx/model-fp16.onnx`   | 231 MB |
+| `medium-int8`      | Rukh medium (int8)          | `chorcat/rukh-medium`, `onnx/model-int8.onnx`   | 122 MB |
+| `medium-dpo-fp16`  | Rukh medium + DPO (fp16)    | `chorcat/rukh-medium-dpo`                       | 231 MB |
+| `medium-grpo-fp16` | Rukh medium + GRPO (fp16)   | `chorcat/rukh-medium-grpo`                      | 231 MB |
+| `medium-elo-fp16`  | Rukh medium + Elo (fp16)    | `chorcat/rukh-medium-elo`                       | 231 MB |
+| `medium-elo-int8`  | Rukh medium + Elo (int8)    | `chorcat/rukh-medium-elo`                       | 122 MB |
+| `medium-lora-fp16` | Rukh medium + estilo (fp16) | `chorcat/rukh-medium-lora` (swappable adapters) | 232 MB |
+| `medium-lora-int8` | Rukh medium + estilo (int8) | `chorcat/rukh-medium-lora`                      | 122 MB |
 
-The sizes are **provisional**: they live in `STAGE_SIZE_MB`, in one place, and are updated once
-the real export reports the file sizes. `modelUrl(stage)` resolves to
+The sizes are measured and live in `STAGE_SIZE_MB`, in one place; the worker checks the real
+length against the graph. `modelUrl(stage)` resolves to
 `https://huggingface.co/<repo>/resolve/main/<file>`. Without `?stage=` the default is
 `small-int8` on mobile or when `navigator.connection.saveData` is on, and `small-fp16` otherwise.
 `?stage=test` points at a 169 KB toy decoder in `public/test/`, which is how the E2E suite
 exercises the real worker path without touching the Hub.
 
-The Elo selector (1200-2400 in steps of 100) stays disabled until the Elo-conditioned checkpoints
-of M4 land; the prompt already carries both Elo tokens.
+The Elo selector (1200-2400 in steps of 100) is enabled for the Elo-conditioned stages; the prompt
+carries both Elo tokens for every stage.
 
 ### Consent (two of them)
 
@@ -290,6 +298,33 @@ biases on that boundary, and check that it still weighs under 200 KB.
 `chess.js` order, downloading nothing. It is what most of the E2E suite uses. `?color=b` makes you
 play black (the opponent moves first).
 
+## Three modes, one screen
+
+`?mode=play` (the default), `?mode=arena` and `?mode=puzzles` are the three things the screen can
+do; the mode switcher sits above the board (`data-testid="modes"`) and the board, the panel and
+the move list are the same components in the three.
+
+**Arena** (`src/islands/Arena.tsx`, `src/lib/arena.ts`): two stages play each other in the
+browser, each in its own decoder worker, with the same arithmetic as `rukh eval match` in the
+Python harness. Games come in pairs with mirrored colours from a seeded random opening
+(`openingBook`: six plies drawn with `mulberry32`, so the same seed gives the same book on any
+machine); a game is scored 1, ½ or 0 for the first stage and cut at 300 plies. The summary is
+the score, the Elo difference it implies (`eloDifference`) and a percentile bootstrap interval
+over the games (`bootstrapElo`), plus `gamesNeeded`: how many games a difference of that size
+would need to separate from zero, printed next to what has been played so far. `?vs=<stage>`
+picks the second stage (ignored when it is not a registered one); the first is `?stage=`.
+
+**Puzzles** (`src/islands/Puzzles.tsx`, `src/lib/puzzles.ts`): the stage solves the 150 puzzles
+of `public/puzzles.json` (50 per difficulty band, exported by `labs/m6/puzzles_export.py` in the
+`rukh` repo from the test split) under the harness's own criterion: the prompt is the real game
+prefix with the players' ratings, and the puzzle counts only when the **whole** line is played,
+not the first move. The table by band updates live and can be read against the row of the
+results table for that stage; the board shows each attempt as it is played and is locked to
+input (`data-locked`) while the model plays.
+
+`?fen=` opens the board at a position (validated with `chess.js`, silently ignored otherwise) in
+play mode, which is how the course links to a position from a lesson.
+
 ## Tokenizers
 
 `src/lib/chess-lm/` is the TypeScript twin of the Python tokenizers in `rukh/src/rukh/tokenize/`.
@@ -349,7 +384,11 @@ without the ML repo. Two details of the fixture are easy to get wrong:
 
 ```
 src/pages/index.astro     the only page (+ 404)
-src/islands/App.tsx       game state (signals) and the three zones
+src/islands/App.tsx       game state (signals), the mode and the three zones
+src/islands/Arena.tsx     two stages against each other, mirrored openings, Elo difference
+src/islands/Puzzles.tsx   the 150 puzzles, live, under the harness's criterion
+src/lib/arena.ts          seeded openings, score, Elo difference and its bootstrap interval
+src/lib/puzzles.ts        puzzle set, prefix and expected line, progress by band
 src/islands/Board.tsx     cm-chessboard + markers + promotion + accessibility
 src/islands/ModelPanel.tsx, MoveList.tsx
 src/lib/game.ts           pure rules wrapper: applyMove, undoPair, toPgn, legalTargets
@@ -364,12 +403,13 @@ src/workers/rpc.ts        ids, promises and progress for both clients (shared)
 src/lib/model.ts          prompt, legality mask, sampling and timings
 src/lib/worker-protocol.ts typed messages, ORT version and the model cache name
 src/lib/registry.ts       model and encoder stages, sizes and Hub URLs
-src/lib/query.ts          ?mock, ?stage, ?encoder, ?color
+src/lib/query.ts          ?mock, ?stage, ?encoder, ?color, ?mode, ?vs, ?fen
 src/lib/chess-lm/         UCI, SAN char and BPE tokenizers, the squares scheme, vocab and fixtures
 src/styles/tokens.css     design tokens copied from rukh-lab (hash-locked)
 src/styles/board.css      board theme derived from the tokens
 public/ort/<version>/     self-hosted ORT runtime (generated, git-ignored)
 public/test/              169 KB toy decoder (?stage=test), 84 KB toy encoder (?encoder=test)
+public/puzzles.json       the 150 puzzles of the puzzles mode (from rukh, labs/m6)
 e2e/                      game, layout, a11y, model and encoder specs
 e2e/fixtures/coi-server.mjs  dist/ served with the production headers and MIME types
 nginx/, Dockerfile        static serving with COOP/COEP and security headers
