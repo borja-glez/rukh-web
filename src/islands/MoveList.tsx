@@ -62,9 +62,19 @@ export default function MoveList({
   const current = history.length - 1;
   const list = useRef<HTMLOListElement>(null);
 
-  // Keep the current ply visible once the list grows past its fixed height.
+  // Keep the current ply visible once the list grows past its fixed height. Only the list
+  // scrolls, never the page: `scrollIntoView` walks every scrollable ancestor, and on a
+  // one-column layout that moved the document by hundreds of pixels *during* a touch, so the
+  // click the browser synthesises after `touchend` landed on whatever had slid under the finger
+  // (the mode switcher, once it existed). A page must not move because a move was played.
   useEffect(() => {
-    list.current?.querySelector('.is-current')?.scrollIntoView({ block: 'nearest' });
+    const container = list.current;
+    const current = container?.querySelector<HTMLElement>('.is-current');
+    if (!container || !current) return;
+    const box = container.getBoundingClientRect();
+    const ply = current.getBoundingClientRect();
+    if (ply.top < box.top) container.scrollTop += ply.top - box.top;
+    else if (ply.bottom > box.bottom) container.scrollTop += ply.bottom - box.bottom;
   }, [history.length]);
 
   return (
