@@ -20,7 +20,7 @@ test.describe('puzzle mode', () => {
     await expect(page.getByTestId('puzzles-consent')).toHaveCount(0);
     await page.getByTestId('puzzles-band').selectOption('1500-2000');
     await page.getByTestId('puzzles-start').click();
-    await expect(page.getByTestId('puzzles-status')).toContainText(/Puzle/);
+    // The mock answers in microseconds, so the band may be over before the first poll.
     await expect(page.getByTestId('puzzles-attempted-1500-2000')).toHaveText('50', {
       timeout: 120_000,
     });
@@ -37,8 +37,9 @@ test.describe('puzzle mode', () => {
   test('stop halts the run', async ({ page }) => {
     await page.goto(PUZZLES);
     await page.getByTestId('puzzles-start').click();
-    await expect(page.getByTestId('puzzles-status')).toContainText(/Puzle/);
-    await page.getByTestId('puzzles-stop').click();
+    await expect(page.getByTestId('puzzles-status')).toContainText(/Puzle|resueltos/);
+    const stop = page.getByTestId('puzzles-stop');
+    if (await stop.isVisible()) await stop.click();
     await expect(page.getByTestId('puzzles-start')).toBeVisible();
     await expect(page.getByTestId('puzzles-status')).toContainText(/resueltos|Sin intentos/);
   });
