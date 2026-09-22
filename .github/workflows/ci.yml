@@ -14,14 +14,17 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # Pinned, not `ubuntu-latest`: that label moves to Ubuntu 26 from 2026-10-19, and this job
+    # builds a Docker image and runs Playwright and Lighthouse, which is exactly the kind of work
+    # that notices an OS bump. Move it on purpose, with a run that proves it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -42,7 +45,7 @@ jobs:
 
       - name: Upload Lighthouse reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lighthouseci
           path: |
@@ -58,7 +61,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: playwright-report
@@ -66,7 +69,7 @@ jobs:
 
       - name: Upload viewport screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: screens
           path: test-results/screens
