@@ -31,6 +31,9 @@ describe('public/puzzles.json', () => {
     }
   });
 
+  // 30 s, not the 5 s default: this replays the 150 games of the set through chess.js, 55 plies of
+  // prefix each, and on CI it shares two cores with the worker-chunk test, which runs a whole Astro
+  // build. It takes ~1.5 s on a developer box and timed out at 5 s on the runner.
   it('replays every prefix onto the puzzle’s own position', () => {
     for (const band of BANDS) {
       for (const puzzle of SET.bands[band]) {
@@ -43,7 +46,7 @@ describe('public/puzzles.json', () => {
         for (const uci of puzzle.moves) chess.move(uciMove(uci));
       }
     }
-  });
+  }, 30_000);
 });
 
 describe('the puzzle helpers', () => {
