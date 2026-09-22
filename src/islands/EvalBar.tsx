@@ -38,8 +38,21 @@ interface Props {
   evaluation: Signal<Evaluation | null>;
 }
 
-/** Above this the encoder is calling the last move a blunder; the head answers a probability. */
-export const BLUNDER_THRESHOLD = 0.5;
+/**
+ * Above this the encoder is calling the last move a blunder; the head answers a probability.
+ *
+ * The **tuned** operating point of the published head (`threshold_tuned` of the `encoder-v4` run,
+ * which its model card prints as `p >= 0.09617`), not the factory 0.5 of
+ * `configs/eval/encoder.yaml`. The head is not calibrated: a blunder is 3.7 % of the labelled
+ * rows, so its probabilities sit low and the published head never reaches 0.5. With that as the
+ * threshold this alert could not fire once, and the demo would have been shipping "no blunder,
+ * ever" as if it were a measurement.
+ *
+ * It is a constant here because ORT Web does not expose `metadata_props` (see `contract.ts`).
+ * `rukh export --blunder-threshold` now writes `rukh_blunder_threshold` into the file, so once a
+ * model carrying it is served this can be read off the model the way `byo.ts` reads `rukh_block`.
+ */
+export const BLUNDER_THRESHOLD = 0.09617;
 
 /** Share of the bar that belongs to White, as a percentage string. */
 export function whiteShare(value: number): string {

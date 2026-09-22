@@ -67,6 +67,15 @@ describe('how the bar reads', () => {
   });
 
   it('alerts on a probability, not on a logit', () => {
-    expect(BLUNDER_THRESHOLD).toBe(0.5);
+    expect(BLUNDER_THRESHOLD).toBeGreaterThan(0);
+    expect(BLUNDER_THRESHOLD).toBeLessThan(1);
+  });
+
+  it('sits where the published head can actually reach it', () => {
+    // The blunder head is not calibrated: a blunder is 3.7 % of the labelled rows, so its
+    // probabilities sit low and the published encoder never reaches the factory 0.5. Pinning the
+    // threshold there made this alert unreachable, which is a bug the types cannot catch -- the
+    // demo just never warned. 0.31 is the highest the published head was seen to answer.
+    expect(BLUNDER_THRESHOLD).toBeLessThan(0.31);
   });
 });
