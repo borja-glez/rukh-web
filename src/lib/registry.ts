@@ -215,9 +215,11 @@ export const STAGES: Stage[] = [
     sizeMb: STAGE_SIZE_MB['medium-dpo-fp16'],
     block: DEFAULT_BLOCK,
   },
-  // `medium` after GRPO against a verifiable reward: +43 Elo over the base, and the aligned model
-  // that damages legality least -- 1.66 times its base's illegal-proposal rate against the 2.0-2.6
-  // of the two DPO arms.
+  // `medium` after GRPO against a verifiable reward: +44 Elo over the base (95 % CI 23 to 66,
+  // 800 games pooled over both directions -- a single direction reads 43, which is not the
+  // number), and the aligned model that damages legality least: 1.66 times its base's
+  // illegal-proposal rate, against roughly 1.7-2.0 for the on-policy DPO arm and 2.0-2.9 for the
+  // off-policy one (D-121).
   {
     id: 'medium-grpo-fp16',
     label: 'Rukh medium + GRPO (fp16)',
