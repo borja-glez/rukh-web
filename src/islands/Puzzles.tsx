@@ -196,9 +196,20 @@ export default function Puzzles({ game, status, stageLabel, sizeMb, onLoad, pick
       {phase === 'consent' ? (
         <div class="consent" data-testid="puzzles-consent">
           <p class="consent__text">
-            <strong>{stageLabel}</strong> se descarga desde Hugging Face: {sizeMb} MB, licencia{' '}
-            {MODEL_LICENSE}. Los puzles son cincuenta por tramo, del mismo conjunto de prueba que
-            mide la tabla del curso.
+            {/* A model read from disk is already here: saying it downloads would be a lie, and
+                this text exists precisely to be believed before bytes are spent. */}
+            {sizeMb > 0 ? (
+              <>
+                <strong>{stageLabel}</strong> se descarga desde Hugging Face: {sizeMb} MB, licencia{' '}
+                {MODEL_LICENSE}.{' '}
+              </>
+            ) : (
+              <>
+                <strong>{stageLabel}</strong> ya está en tu navegador: no se descarga nada.{' '}
+              </>
+            )}
+            Los puzles son cincuenta por tramo, del mismo conjunto de prueba que mide la tabla del
+            curso.
           </p>
           <button
             type="button"
@@ -206,7 +217,7 @@ export default function Puzzles({ game, status, stageLabel, sizeMb, onLoad, pick
             data-testid="puzzles-load"
             onClick={onLoad}
           >
-            Descargar
+            {sizeMb > 0 ? 'Descargar' : 'Empezar'}
           </button>
         </div>
       ) : null}

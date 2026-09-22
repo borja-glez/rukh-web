@@ -9,7 +9,7 @@ import { asResponse, type ProgressMessage, type WorkerRequest } from '../lib/wor
  * which is how the clients are tested without a browser.
  */
 export interface WorkerLike {
-  postMessage(message: unknown): void;
+  postMessage(message: unknown, transfer?: Transferable[]): void;
   addEventListener(type: 'message', listener: (event: { data: unknown }) => void): void;
   addEventListener(type: 'error', listener: (event: { message?: string }) => void): void;
   terminate(): void;
@@ -23,6 +23,12 @@ export interface Rpc {
   send<T>(
     request: Unidentified<WorkerRequest>,
     onProgress?: (progress: ProgressMessage) => void,
+    /**
+     * Buffers to hand over instead of copying. A 230 MB model posted by value is 230 MB cloned
+     * before the worker sees any of it; transferred, it changes owner and the sender's view is
+     * detached. Callers that transfer must not read the buffer afterwards.
+     */
+    transfer?: Transferable[],
   ): Promise<T>;
   /** Rejects everything in flight and terminates the worker; the handle is unusable afterwards. */
   close(reason: string): void;
@@ -75,12 +81,16 @@ export function createRpc(worker: WorkerLike, crashMessage: string): Rpc {
     get closed() {
       return closedReason !== null;
     },
-    send<T>(request: Unidentified<WorkerRequest>, onProgress?: (p: ProgressMessage) => void) {
+    send<T>(
+      request: Unidentified<WorkerRequest>,
+      onProgress?: (p: ProgressMessage) => void,
+      transfer?: Transferable[],
+    ) {
       if (closedReason !== null) return Promise.reject(new Error(closedReason));
       const id = nextId++;
       return new Promise<T>((resolve, reject) => {
         pending.set(id, { resolve: resolve as (value: never) => void, reject, onProgress });
-        worker.postMessage({ ...request, id } as WorkerRequest);
+        worker.postMessage({ ...request, id } as WorkerRequest, transfer);
       });
     },
     close(reason: string) {

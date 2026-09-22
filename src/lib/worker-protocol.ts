@@ -31,8 +31,17 @@ export interface InitRequest {
   id: number;
   /** Registry stage id, only used for diagnostics and the cache log. */
   stage: string;
-  /** Absolute or same-origin URL of the `.onnx` file. */
+  /** Absolute or same-origin URL of the `.onnx` file; ignored when `bytes` is present. */
   url: string;
+  /**
+   * The model itself, when it came from the reader's disk instead of the network.
+   *
+   * Transferred rather than copied, so the buffer is detached on this side the moment it is
+   * sent. A local model takes this path instead of `url` on purpose: no `fetch` means no
+   * `connect-src` to widen, no Cache API entry to leave behind and nothing that could send the
+   * file anywhere. See `lib/byo.ts`.
+   */
+  bytes?: Uint8Array;
   /** Expected size in bytes; used for the progress bar when there is no `content-length`. */
   sizeBytes: number;
   /** Context window the stage was trained with (`DecoderConfig.block`), from the registry. */

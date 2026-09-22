@@ -310,6 +310,40 @@ select {
   gap: 6px;
 }
 
+/* Bringing your own model: the file input plus the line that says the file stays on this device. */
+.model__byo-note {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.model__file {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: var(--chip-bg);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.model__file::file-selector-button {
+  min-height: 28px;
+  margin-right: 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.model__file:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .model__status {
   min-height: 16px;
 }

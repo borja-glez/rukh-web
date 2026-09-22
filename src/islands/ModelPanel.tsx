@@ -20,6 +20,7 @@ import {
   type ProgressMessage,
 } from '../lib/worker-protocol';
 import type { Stage } from '../lib/registry';
+import { MAX_MODEL_BYTES, type LocalModel } from '../lib/byo';
 import type { ClearCacheResult, EncoderStatus, ModelStatus } from './App';
 
 interface Props {
@@ -39,6 +40,12 @@ interface Props {
   /** True while a style adapter is being downloaded and installed. */
   adapterBusy: Signal<boolean>;
   onStage: (id: string) => void;
+  /** The model the reader loaded from their own disk, when there is one. */
+  localModel: Signal<LocalModel | null>;
+  /** Why the last picked file was refused; separate from the loaded model's own error. */
+  localError: Signal<string | null>;
+  /** Called with the picked `.onnx`; rejected files come back as `error`. */
+  onLocalModel: (file: File) => void;
   onAdapter: (id: string) => void;
   onColor: (color: Color) => void;
   onPlay: () => void;
@@ -113,6 +120,9 @@ export default function ModelPanel({
   adapter,
   adapterBusy,
   onStage,
+  localModel,
+  localError,
+  onLocalModel,
   onAdapter,
   onColor,
   onPlay,
@@ -128,7 +138,11 @@ export default function ModelPanel({
   const state = game.value;
   const color = human.value;
   const locked = busy.value;
-  const current = findStage(stage.value) ?? STAGES[0];
+  const local = localModel.value;
+  const current =
+    (local && stage.value === local.stage.id ? local.stage : undefined) ??
+    findStage(stage.value) ??
+    STAGES[0];
   const phase = status.value;
   const download = progress.value;
   const encoder = findEncoderStage(encoderStage.value) ?? ENCODER_STAGES[0];
@@ -159,13 +173,43 @@ export default function ModelPanel({
           disabled={phase === 'loading'}
           onChange={(event) => onStage((event.currentTarget as HTMLSelectElement).value)}
         >
-          {selectableStages(stage.value).map((entry) => (
+          {[...(local ? [local.stage] : []), ...selectableStages(stage.value)].map((entry) => (
             <option key={entry.id} value={entry.id}>
               {entry.label}
               {entry.sizeMb > 0 ? ` · ${entry.sizeMb} MB` : ''}
             </option>
           ))}
         </select>
+      </label>
+      {/* A `label` like every other field: a bare `span` next to an input names nothing, which
+          is what axe's `label` rule flags. */}
+      <label class="model__field model__byo">
+        <span class="caption">Tu propio modelo</span>
+        <input
+          class="model__file"
+          type="file"
+          accept=".onnx"
+          disabled={locked || phase === 'loading'}
+          aria-describedby="byo-note"
+          onChange={(event) => {
+            const input = event.currentTarget as HTMLInputElement;
+            const picked = input.files?.[0];
+            /* Clearing the input lets the same file be picked twice in a row, which is what
+               happens while somebody re-exports and tries again. */
+            input.value = '';
+            if (picked) onLocalModel(picked);
+          }}
+        />
+        {localError.value ? (
+          <span class="model__error caption" role="alert" data-testid="byo-error">
+            {localError.value}
+          </span>
+        ) : null}
+        <span id="byo-note" class="caption model__byo-note">
+          El <code>.onnx</code> que deja <code>rukh export</code>, hasta{' '}
+          {Math.round(MAX_MODEL_BYTES / 1_000_000)} MB. Se lee en tu navegador: no se sube a ningún
+          sitio y no queda guardado al recargar.
+        </span>
       </label>
       <label class="model__field">
         <span class="caption">Elo objetivo</span>

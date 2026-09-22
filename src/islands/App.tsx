@@ -36,6 +36,7 @@ import {
   type Stage,
 } from '../lib/registry';
 import { MODEL_CACHE, type Backend, type ProgressMessage } from '../lib/worker-protocol';
+import { isLocalStage, modelBytes, readLocalModel, type LocalModel } from '../lib/byo';
 import { isCached } from '../lib/download';
 import { fenToTokens, UciTokenizer } from '../lib/chess-lm';
 import { createDecoder, type Decoder } from '../workers/decoder-client';
@@ -146,7 +147,27 @@ const illegal = signal<string | null>(null);
 let decoder: Decoder | null = null;
 let encoder: Encoder | null = null;
 
+/**
+ * The model the reader picked from their own disk, when there is one.
+ *
+ * A signal rather than a registry entry, and deliberately not persisted: it is gone on reload.
+ * A local model the page could restore by itself is a local model a crafted link could ask it
+ * to restore. See `lib/byo.ts`.
+ */
+const localModel = signal<LocalModel | null>(null);
+
+/**
+ * Why the last picked file was refused, when it was.
+ *
+ * Its own signal rather than the panel's `error`: that one belongs to the model that is loaded,
+ * and picking the wrong file should not make the page look as if the model you were playing had
+ * broken. This clears as soon as a good file arrives.
+ */
+const localError = signal<string | null>(null);
+
 function currentStage(): Stage {
+  const local = localModel.value;
+  if (local && stage.value === local.stage.id) return local.stage;
   return findStage(stage.value) ?? STAGES[0];
 }
 
@@ -300,10 +321,15 @@ async function load() {
   progress.value = null;
   try {
     decoder ??= createDecoder();
+    /* The local model is read here rather than kept around: the buffer is transferred to the
+       worker, which detaches it, so a stored copy would be a detached one. */
+    const local = isLocalStage(entry) ? localModel.value : null;
+    const bytes = local ? await modelBytes(local.file) : undefined;
     const ready = await decoder.init(
       {
         stage: entry.id,
-        url: modelUrl(entry),
+        url: bytes ? '' : modelUrl(entry),
+        bytes,
         sizeBytes: Math.round(entry.sizeMb * 1_000_000),
         block: stageBlock(entry),
         vocab: tokenizer.size,
@@ -435,6 +461,31 @@ async function chooseAdapter(id: string): Promise<void> {
   }
 }
 
+/**
+ * Takes the file the reader picked and makes it the live stage.
+ *
+ * A rejected file leaves the current stage exactly where it was: picking the wrong thing should
+ * cost a message, not the model you were already playing.
+ */
+async function chooseLocalModel(file: File) {
+  localError.value = null;
+  const read = await readLocalModel(file);
+  if ('error' in read) {
+    localError.value = read.error;
+    return;
+  }
+  const first = localModel.value === null;
+  localModel.value = read;
+  if (first || stage.value !== read.stage.id) {
+    /* `chooseStage` loads a local stage on its own; calling `load` here too would open a second
+       session for the same file. */
+    chooseStage(read.stage.id);
+  } else {
+    /* Same id, different file: the selector has nothing to switch, so load it directly. */
+    void load();
+  }
+}
+
 function chooseStage(id: string) {
   if (id === stage.value) return;
   stage.value = id;
@@ -454,6 +505,13 @@ function chooseStage(id: string) {
     status.value = 'mock';
     void decoder?.dispose();
     decoder = null;
+  } else if (isLocalStage(entry)) {
+    /* A file already on the disk costs no bytes, so there is nothing to consent to: that step
+       exists to warn before spending somebody's data. Picking it again from the selector loads
+       it the way the picker does, straight away. */
+    void decoder?.dispose();
+    decoder = null;
+    void load();
   } else {
     // A new stage means a new session: back to the consent step, nothing is fetched yet.
     status.value = 'consent';
@@ -579,7 +637,10 @@ export default function App() {
           <Arena
             game={game}
             mock={status.value === 'mock'}
-            initialA={stage.value}
+            /* The arena loads two stages by id from the registry, and the local model has no
+               entry there: handing it over would silently fall back to the mock. Enfrentar tu
+               modelo contra uno publicado es el paso siguiente, no este. */
+            initialA={isLocalStage(currentStage()) ? (STAGES[1]?.id ?? STAGES[0].id) : stage.value}
             initialB={arenaB.value}
           />
         ) : null}
@@ -608,6 +669,9 @@ export default function App() {
             adapter={adapter}
             adapterBusy={adapterBusy}
             onStage={chooseStage}
+            localModel={localModel}
+            localError={localError}
+            onLocalModel={(file) => void chooseLocalModel(file)}
             onAdapter={(id) => void chooseAdapter(id)}
             onColor={chooseColor}
             onPlay={() => void load()}

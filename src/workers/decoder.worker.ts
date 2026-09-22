@@ -62,9 +62,14 @@ function reply(message: WorkerResponse, transfer?: Transferable[]): void {
  * of 80 MB sitting next to it for as long as the worker lives.
  */
 async function loadSession(request: Extract<DecoderRequest, { type: 'init' }>) {
-  const bytes = await fetchModel(request.url, request.sizeBytes, (loaded, total) =>
-    reply({ type: 'progress', id: request.id, loaded, total }),
-  );
+  /* A local model arrives whole: it was read from disk, so there is nothing to download and no
+     progress to report. Everything after this point is identical, including the contract check
+     that decides whether these bytes are a Rukh decoder at all. */
+  const bytes =
+    request.bytes ??
+    (await fetchModel(request.url, request.sizeBytes, (loaded, total) =>
+      reply({ type: 'progress', id: request.id, loaded, total }),
+    ));
   return createSession(bytes);
 }
 

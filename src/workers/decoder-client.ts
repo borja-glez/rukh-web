@@ -65,7 +65,13 @@ export function createDecoder(worker: WorkerLike = spawn()): Decoder {
 
   return {
     async init(request, onProgress) {
-      const ready = await rpc.send<ReadyMessage>({ type: 'init', ...request }, onProgress);
+      /* A local model travels as its buffer; transferring hands it over instead of cloning it. */
+      const transfer = request.bytes ? [request.bytes.buffer] : undefined;
+      const ready = await rpc.send<ReadyMessage>(
+        { type: 'init', ...request },
+        onProgress,
+        transfer,
+      );
       return {
         backend: ready.backend,
         fallbackReason: ready.fallbackReason,
