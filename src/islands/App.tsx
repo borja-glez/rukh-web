@@ -125,6 +125,14 @@ const encoderBackend = signal<Backend | null>(null);
 const encoderError = signal<string | null>(null);
 const evaluation = signal<Evaluation | null>(null);
 /**
+ * The operating point of the blunder head that is loaded, read off the file itself.
+ *
+ * The head is not calibrated, so the threshold belongs to the weights and not to this page. A
+ * model exported before `rukh export --blunder-threshold` existed does not carry it, and the bar
+ * falls back to `BLUNDER_THRESHOLD`, which is the published encoder's.
+ */
+const blunderThreshold = signal<number | null>(null);
+/**
  * Bumped every time the game on the board is replaced (new game, undo, colour or stage change).
  * An evaluation that was asked for under an older generation belongs to a game that no longer
  * exists, so it is dropped: the bar deliberately survives the opponent's replies (see
@@ -370,6 +378,7 @@ async function loadEncoder() {
       (update) => (encoderProgress.value = update),
     );
     encoderBackend.value = ready.backend;
+    blunderThreshold.value = ready.blunderThreshold ?? null;
     encoderStatus.value = 'ready';
   } catch (cause) {
     encoderError.value = cause instanceof Error ? cause.message : String(cause);
@@ -390,6 +399,7 @@ async function stopEncoder() {
   encoderStatus.value = 'consent';
   encoderProgress.value = null;
   encoderBackend.value = null;
+  blunderThreshold.value = null;
   encoderError.value = null;
   dropEvaluation();
   await live?.dispose();
@@ -616,7 +626,7 @@ export default function App() {
           onMove={playHuman}
           locked={locked}
         />
-        <EvalBar evaluation={evaluation} />
+        <EvalBar evaluation={evaluation} threshold={blunderThreshold} />
       </div>
       <aside class="panel" data-testid="panel" aria-label="Modelo y jugadas">
         <nav class="modes" aria-label="Modo" data-testid="modes">

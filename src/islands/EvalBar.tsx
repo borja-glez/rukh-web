@@ -36,6 +36,11 @@ export function supersedes(next: Evaluation, current: Evaluation | null): boolea
 interface Props {
   /** The last evaluation, or null while the encoder has not answered for this position. */
   evaluation: Signal<Evaluation | null>;
+  /**
+   * The loaded head's own operating point, from the file's `rukh_blunder_threshold`; null for a
+   * model exported before the exporter wrote it, and then `BLUNDER_THRESHOLD` stands in.
+   */
+  threshold?: Signal<number | null>;
 }
 
 /**
@@ -48,9 +53,11 @@ interface Props {
  * threshold this alert could not fire once, and the demo would have been shipping "no blunder,
  * ever" as if it were a measurement.
  *
- * It is a constant here because ORT Web does not expose `metadata_props` (see `contract.ts`).
- * `rukh export --blunder-threshold` now writes `rukh_blunder_threshold` into the file, so once a
- * model carrying it is served this can be read off the model the way `byo.ts` reads `rukh_block`.
+ * This is the **fallback**. The published encoder carries `rukh_blunder_threshold` in its ONNX
+ * metadata and the worker reads it off the file (ORT Web does not expose `metadata_props`, so it
+ * is parsed the way `byo.ts` parses `rukh_block`), which is what a model somebody brings from
+ * their own disk needs too. The constant stands in only for a file exported before the key
+ * existed, so that an old model shows a usable alert rather than none.
  */
 export const BLUNDER_THRESHOLD = 0.09617;
 
@@ -96,10 +103,11 @@ export function advantage(value: number): string {
  * style *attributes* (`style-src-attr 'unsafe-inline'`, which cm-chessboard already needs to drag
  * a piece) while `style-src` itself stays hashed, so nothing is relaxed for this bar.
  */
-export default function EvalBar({ evaluation }: Props) {
+export default function EvalBar({ evaluation, threshold }: Props) {
   const current = evaluation.value;
   if (!current) return null;
-  const alert = current.blunder > BLUNDER_THRESHOLD && current.move !== null;
+  const alertAbove = threshold?.value ?? BLUNDER_THRESHOLD;
+  const alert = current.blunder > alertAbove && current.move !== null;
   const reading = `${formatValue(current.value)} · ${advantage(current.value)}`;
   const about = current.move ? ` tras ${current.move}` : '';
 

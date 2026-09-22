@@ -23,6 +23,11 @@ export interface EncoderReport {
   block: number;
   /** The two outputs the contract check found: the value head and the blunder head. */
   outputs: [string, string];
+  /**
+   * The head's tuned operating point, from `rukh_blunder_threshold` in the file; absent for a
+   * model exported before the key existed.
+   */
+  blunderThreshold?: number;
 }
 
 /** What `init` needs to know about an encoder stage; the worker's `id` is added by `send`. */
@@ -72,6 +77,7 @@ export function createEncoder(worker: WorkerLike = spawn()): Encoder {
         loadMs: ready.loadMs,
         block: ready.block,
         outputs: ready.outputs,
+        blunderThreshold: ready.blunderThreshold,
       };
     },
     async evaluate(ids) {

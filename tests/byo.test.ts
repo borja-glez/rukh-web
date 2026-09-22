@@ -5,6 +5,7 @@ import {
   isLocalStage,
   localStage,
   readBlock,
+  readBlunderThreshold,
   readLocalModel,
   safeName,
 } from '../src/lib/byo';
@@ -188,5 +189,38 @@ describe('the local stage', () => {
   it('truncates a name long enough to break the panel', () => {
     const name = `${'a'.repeat(200)}.onnx`;
     expect(safeName(name).length).toBeLessThanOrEqual(48);
+  });
+});
+
+describe('reading rukh_blunder_threshold out of an ONNX file', () => {
+  it('finds the operating point the exporter wrote', () => {
+    expect(readBlunderThreshold(modelProto([['rukh_blunder_threshold', '0.0961714']]))).toBeCloseTo(
+      0.0961714,
+      7,
+    );
+  });
+
+  it('finds it beside the other rukh keys', () => {
+    const file = modelProto([
+      ['rukh_kind', 'encoder'],
+      ['rukh_blunder_threshold', '0.25'],
+      ['rukh_block', '69'],
+    ]);
+    expect(readBlunderThreshold(file)).toBe(0.25);
+    expect(readBlock(file)).toBe(69);
+  });
+
+  it('returns null for a model exported before the key existed', () => {
+    // The caller then keeps its own default instead of inventing an operating point.
+    expect(readBlunderThreshold(modelProto([['rukh_kind', 'encoder']]))).toBeNull();
+  });
+
+  it.each([
+    ['not a number', 'bajo'],
+    ['zero', '0'],
+    ['negative', '-0.1'],
+    ['not a probability', '1.5'],
+  ])('refuses a threshold that is %s', (_why, value) => {
+    expect(readBlunderThreshold(modelProto([['rukh_blunder_threshold', value]]))).toBeNull();
   });
 });

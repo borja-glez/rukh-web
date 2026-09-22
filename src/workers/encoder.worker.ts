@@ -23,6 +23,7 @@ import {
   type EncoderContract,
 } from '../lib/contract';
 import type { EncoderRequest, WorkerResponse } from '../lib/worker-protocol';
+import { readBlunderThreshold } from '../lib/byo';
 import { configureOrt, createSerial, createSession, fetchModel, inputFeeds } from './ort-runtime';
 
 /** The worker global, typed with just what this file uses (avoids pulling in the webworker lib). */
@@ -57,9 +58,12 @@ async function init(request: Extract<EncoderRequest, { type: 'encoder-init' }>):
     );
     const created = await createSession(bytes);
     const checked = readEncoderContract(created.session, request.block);
+    // Read before the bytes go out of scope: ORT Web does not expose `metadata_props`, so the
+    // only chance to learn the head's operating point is the file we just downloaded.
+    const threshold = readBlunderThreshold(bytes);
     session = created.session;
     contract = checked;
-    return { backend: created.backend, reason: created.reason, contract: checked };
+    return { backend: created.backend, reason: created.reason, contract: checked, threshold };
   });
   reply({
     type: 'encoder-ready',
@@ -69,6 +73,7 @@ async function init(request: Extract<EncoderRequest, { type: 'encoder-init' }>):
     loadMs: Math.round(performance.now() - started),
     block: ready.contract.block,
     outputs: [ready.contract.outputs[0], ready.contract.outputs[1]],
+    ...(ready.threshold === null ? {} : { blunderThreshold: ready.threshold }),
   });
 }
 

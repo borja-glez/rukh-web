@@ -136,6 +136,7 @@ const METADATA_PROPS_FIELD = 14;
 const KEY_FIELD = 1;
 const VALUE_FIELD = 2;
 const BLOCK_KEY = 'rukh_block';
+const BLUNDER_THRESHOLD_KEY = 'rukh_blunder_threshold';
 
 interface Cursor {
   bytes: Uint8Array;
@@ -182,8 +183,8 @@ function entry(bytes: Uint8Array, at: number, end: number): { key: string; value
   return { key, value };
 }
 
-/** The `rukh_block` the exporter wrote, or null when the file does not carry one. */
-export function readBlock(bytes: Uint8Array): number | null {
+/** The value of one `rukh_*` metadata key, or null when the file does not carry it. */
+export function readMetadata(bytes: Uint8Array, wanted: string): string | null {
   const c: Cursor = { bytes, at: 0 };
   while (c.at < bytes.length) {
     const tag = varint(c);
@@ -209,12 +210,31 @@ export function readBlock(bytes: Uint8Array): number | null {
     if (length === null || c.at + length > bytes.length) return null;
     if (field === METADATA_PROPS_FIELD) {
       const pair = entry(bytes, c.at, c.at + length);
-      if (pair && pair.key === BLOCK_KEY) {
-        const block = Number.parseInt(pair.value, 10);
-        return Number.isInteger(block) && block > 0 && block <= 8192 ? block : null;
-      }
+      if (pair && pair.key === wanted) return pair.value;
     }
     c.at += length;
   }
   return null;
+}
+
+/** The `rukh_block` the exporter wrote, or null when the file does not carry one. */
+export function readBlock(bytes: Uint8Array): number | null {
+  const raw = readMetadata(bytes, BLOCK_KEY);
+  if (raw === null) return null;
+  const block = Number.parseInt(raw, 10);
+  return Number.isInteger(block) && block > 0 && block <= 8192 ? block : null;
+}
+
+/**
+ * The tuned blunder threshold the exporter wrote, or null when the file does not carry one.
+ *
+ * The blunder head is not calibrated, so the probability it answers means nothing without the
+ * operating point it was tuned at. A file exported before `rukh export --blunder-threshold`
+ * existed has no key, and the caller keeps its own default rather than inventing one.
+ */
+export function readBlunderThreshold(bytes: Uint8Array): number | null {
+  const raw = readMetadata(bytes, BLUNDER_THRESHOLD_KEY);
+  if (raw === null) return null;
+  const value = Number.parseFloat(raw);
+  return Number.isFinite(value) && value > 0 && value < 1 ? value : null;
 }

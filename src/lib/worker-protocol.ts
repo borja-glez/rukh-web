@@ -139,6 +139,14 @@ export interface EncoderReadyMessage {
   block: number;
   /** The two outputs the contract check found, in order: the value and the blunder head. */
   outputs: [string, string];
+  /**
+   * `rukh_blunder_threshold` from the file, when it carries one.
+   *
+   * The blunder head is not calibrated, so its operating point is a property of the weights and
+   * not of the page. A model exported before the exporter wrote the key has none, and the island
+   * keeps its own default.
+   */
+  blunderThreshold?: number;
 }
 
 export interface EvaluationMessage {
