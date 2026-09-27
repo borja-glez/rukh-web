@@ -230,7 +230,7 @@ tokens. The published one took them without complaint — its sequence axis is d
 checked the length, and those ids are valid in its vocabulary, where they land on control and
 Elo tokens — and answered about +0.1 and a blunder probability of about 3 % for every position,
 so the bar barely moved and the alert, tuned at 9.6 %, never fired. Fed the game, the same file
-reads the position: after `1.e4 e5 2.d4 Nc6 3.Qh5 ... 4.Qxf7+` the bar leans to Black and the
+reads the position: in the mock game `1.e4 Nc6 2.d4 Rb8 3.Qh5 Ra8 4.Qxf7+` the bar leans to Black and the
 alert fires on the queen sacrifice. `e2e/encoder.spec.ts` walks that path with
 `public/test/toy-encoder-moves.onnx` (`?encoder=test-moves`), a random one-layer `moves` encoder
 written by `export_encoder_onnx` like the published file.
