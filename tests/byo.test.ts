@@ -6,6 +6,7 @@ import {
   localStage,
   readBlock,
   readBlunderThreshold,
+  readEncoderInput,
   readLocalModel,
   safeName,
 } from '../src/lib/byo';
@@ -222,5 +223,31 @@ describe('reading rukh_blunder_threshold out of an ONNX file', () => {
     ['not a probability', '1.5'],
   ])('refuses a threshold that is %s', (_why, value) => {
     expect(readBlunderThreshold(modelProto([['rukh_blunder_threshold', value]]))).toBeNull();
+  });
+});
+
+describe('reading rukh_input out of an ONNX file', () => {
+  it('tells a moves encoder from a squares one', () => {
+    expect(
+      readEncoderInput(
+        modelProto([
+          ['rukh_input', 'moves'],
+          ['rukh_block', '200'],
+        ]),
+      ),
+    ).toBe('moves');
+    expect(
+      readEncoderInput(
+        modelProto([
+          ['rukh_kind', 'encoder'],
+          ['rukh_input', 'squares'],
+        ]),
+      ),
+    ).toBe('squares');
+  });
+
+  it('says nothing for a file without the key or with an unknown scheme', () => {
+    expect(readEncoderInput(modelProto([['rukh_block', '69']]))).toBeNull();
+    expect(readEncoderInput(modelProto([['rukh_input', 'pixels']]))).toBeNull();
   });
 });

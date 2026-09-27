@@ -62,15 +62,18 @@ describe('the encoder client', () => {
       backend: 'wasm',
       fallbackReason: 'este navegador no expone WebGPU',
       loadMs: 1234,
-      block: 69,
+      block: 200,
+      input: 'moves',
       outputs: ['value', 'blunder'],
     });
 
+    // The scheme travels from the file to the page: it decides how every position is tokenized.
     await expect(ready).resolves.toEqual({
       backend: 'wasm',
       fallbackReason: 'este navegador no expone WebGPU',
       loadMs: 1234,
-      block: 69,
+      block: 200,
+      input: 'moves',
       outputs: ['value', 'blunder'],
     });
   });
@@ -91,6 +94,7 @@ describe('the encoder client', () => {
       backend: 'webgpu',
       loadMs: 7,
       block: 69,
+      input: 'squares',
       outputs: ['value', 'blunder'],
     });
     await expect(ready).resolves.toMatchObject({ backend: 'webgpu' });

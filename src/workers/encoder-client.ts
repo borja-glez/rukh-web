@@ -13,14 +13,17 @@ import type {
   ProgressMessage,
 } from '../lib/worker-protocol';
 import { createRpc, type WorkerLike } from './rpc';
+import type { EncoderInput } from '../lib/byo';
 
 export interface EncoderReport {
   backend: Backend;
   /** Why WebGPU was not used, when it was not. */
   fallbackReason?: string;
   loadMs: number;
-  /** Tokens the session was accepted for (`squares`: 69). */
+  /** Tokens the session was accepted for: exactly 69 for `squares`, at most this for `moves`. */
   block: number;
+  /** How to tokenize a position for this file: the board (`squares`) or the game (`moves`). */
+  input: EncoderInput;
   /** The two outputs the contract check found: the value head and the blunder head. */
   outputs: [string, string];
   /**
@@ -47,7 +50,7 @@ export interface Encoder {
     request: EncoderLoadRequest,
     onProgress?: (progress: ProgressMessage) => void,
   ): Promise<EncoderReport>;
-  /** The two heads' answers for one position, already tokenized with `fenToTokens`. */
+  /** The two heads' answers for one position, tokenized in the scheme `init` reported. */
   evaluate(ids: number[]): Promise<Evaluation>;
   /** Releases the session and terminates the worker; the handle is unusable afterwards. */
   dispose(): Promise<void>;
@@ -76,6 +79,7 @@ export function createEncoder(worker: WorkerLike = spawn()): Encoder {
         fallbackReason: ready.fallbackReason,
         loadMs: ready.loadMs,
         block: ready.block,
+        input: ready.input,
         outputs: ready.outputs,
         blunderThreshold: ready.blunderThreshold,
       };

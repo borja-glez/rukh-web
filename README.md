@@ -202,7 +202,7 @@ and the encoder never plays. Without `?encoder=` the default is `encoder-int8` o
 
 ### The contract
 
-`rukh.export.export_encoder_onnx` writes a graph with one input, `idx (B, 69)` int64, and exactly
+`rukh.export.export_encoder_onnx` writes a graph with one input, `idx` int64, and exactly
 two outputs: `value`, the evaluation from White's point of view (`tanh(cp / 400)`, so it lives in
 [-1, 1]), and `blunder`, **already a probability** — the sigmoid is inside the graph and the file
 says so in `rukh_blunder=probability`. Nothing of that metadata is readable from ORT Web, so
@@ -211,9 +211,33 @@ called what they are called, every answer carries one number per output, and eac
 inside the range its head can produce. A file that fails any of those is refused before the bar
 is drawn, because a bar read off the wrong tensor is a plausible-looking lie.
 
-### The 69 tokens
+### Two ways to read a position
 
-The encoder reads the _position_, not the game: `src/lib/chess-lm/squares.ts` is the TypeScript
+An encoder is trained on one of two inputs, and its file says which in `rukh_input`:
+
+- **`moves`**, the game that reached the position: `<bos>`, the two Elo tokens and the UCI moves,
+  cropped header-first to `rukh_block` (200) exactly like the decoder's prompt (`buildPrompt` in
+  `src/lib/model.ts`, `LabelledPositions.tokens` in Python). The sequence axis is dynamic, so the
+  page sends the game as long as it is, from 3 tokens up to the block. **The published
+  `chorcat/rukh-encoder` is a `moves` encoder.**
+- **`squares`**, the board alone: the 69 tokens below. The E2E toy is one.
+
+The worker reads `rukh_input` and `rukh_block` straight from the downloaded bytes (ORT Web does
+not expose `metadata_props`, the same reason `rukh_blunder_threshold` is read that way), reports
+the scheme with `encoder-ready`, and the page tokenizes every position accordingly; a file older
+than `rukh_input` is a `squares` one. Until 2026-09-27 the page fed every encoder the 69 board
+tokens. The published one took them without complaint — its sequence axis is dynamic, so nothing
+checked the length, and those ids are valid in its vocabulary, where they land on control and
+Elo tokens — and answered about +0.1 and a blunder probability of about 3 % for every position,
+so the bar barely moved and the alert, tuned at 9.6 %, never fired. Fed the game, the same file
+reads the position: in the mock game `1.e4 Nc6 2.d4 Rb8 3.Qh5 Ra8 4.Qxf7+` the bar leans to Black and the
+alert fires on the queen sacrifice. `e2e/encoder.spec.ts` walks that path with
+`public/test/toy-encoder-moves.onnx` (`?encoder=test-moves`), a random one-layer `moves` encoder
+written by `export_encoder_onnx` like the published file.
+
+### The 69 tokens of `squares`
+
+The `squares` scheme reads the _position_, not the game: `src/lib/chess-lm/squares.ts` is the TypeScript
 twin of `rukh/src/rukh/models/squares.py` and turns a FEN into exactly 69 ids — `<cls>`, the 64
 squares file-major (a1, a2, ..., h8), the side to move, one token for the 16 castling
 combinations, the en-passant file and the bucketed halfmove clock. `src/lib/chess-lm/fixtures/squares.json`

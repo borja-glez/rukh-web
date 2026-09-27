@@ -301,12 +301,20 @@ export const TEST_STAGE: Stage = {
 //
 // The evaluation bar reads its own file (`chorcat/rukh-encoder`), downloaded by its own worker
 // only after its own consent step. It is deliberately kept out of `STAGES`: that list is what the
-// "Etapa" selector offers for *playing*, and the encoder never plays. `block` is 69 because the
-// `squares` scheme is exactly 69 tokens (`src/lib/chess-lm/squares.ts`), not a context window
-// that could be cropped: the worker refuses a position of any other length.
+// "Etapa" selector offers for *playing*, and the encoder never plays.
+//
+// An encoder reads a position in one of two schemes, and the file says which (`rukh_input`): the
+// board as exactly 69 tokens (`squares`, `src/lib/chess-lm/squares.ts`), or the game that reached
+// it, headed by `<bos>` and the two Elo tokens and cropped like the decoder's prompt (`moves`, up
+// to its `rukh_block`). The published encoder is a `moves` one. The worker reads the scheme from
+// the file and the page tokenizes accordingly; `block` here is only what is asked for when a file
+// says nothing, which only an encoder exported before `rukh_input` existed does.
 
 /** Tokens the `squares` scheme feeds the encoder; `SQUARE_TOKENS` in Python and in TypeScript. */
 export const ENCODER_BLOCK = 69;
+
+/** The context of the published `moves` encoder (`rukh_block` in its files). */
+export const MOVES_ENCODER_BLOCK = 200;
 
 /**
  * Download sizes in MB of the encoder exports, measured like `STAGE_SIZE_MB`.
@@ -324,7 +332,7 @@ export const ENCODER_STAGES: Stage[] = [
     repo: 'chorcat/rukh-encoder',
     file: 'onnx/model-fp16.onnx',
     sizeMb: ENCODER_SIZE_MB['encoder-fp16'],
-    block: ENCODER_BLOCK,
+    block: MOVES_ENCODER_BLOCK,
   },
   {
     id: 'encoder-int8',
@@ -333,7 +341,7 @@ export const ENCODER_STAGES: Stage[] = [
     repo: 'chorcat/rukh-encoder',
     file: 'onnx/model-int8.onnx',
     sizeMb: ENCODER_SIZE_MB['encoder-int8'],
-    block: ENCODER_BLOCK,
+    block: MOVES_ENCODER_BLOCK,
   },
 ];
 
@@ -351,6 +359,22 @@ export const TEST_ENCODER_STAGE: Stage = {
   sizeMb: 0.1,
   url: '/test/toy-encoder.onnx',
   block: ENCODER_BLOCK,
+};
+
+/**
+ * A toy `moves` encoder, the other scheme: one layer, `d_model=8`, random weights, exported by
+ * `rukh.export.export_encoder_onnx` like the published one (`idx (B, sequence)` with a dynamic
+ * sequence axis, `rukh_input=moves`, `rukh_block=200`). Reached with `?encoder=test-moves`: it is
+ * how the E2E suite proves the page reads the scheme off the file and feeds the game, not the
+ * board. Its numbers mean nothing; that they change with the game is what is asserted.
+ */
+export const TEST_MOVES_ENCODER_STAGE: Stage = {
+  id: 'test-moves',
+  label: 'Encoder de jugadas de juguete (pruebas)',
+  kind: 'encoder',
+  sizeMb: 0.2,
+  url: '/test/toy-encoder-moves.onnx',
+  block: MOVES_ENCODER_BLOCK,
 };
 
 /**
@@ -407,6 +431,7 @@ export function findStage(id: string): Stage | undefined {
 /** The encoder stage with this id, or undefined. Separate from `findStage`: separate models. */
 export function findEncoderStage(id: string): Stage | undefined {
   if (id === TEST_ENCODER_STAGE.id) return TEST_ENCODER_STAGE;
+  if (id === TEST_MOVES_ENCODER_STAGE.id) return TEST_MOVES_ENCODER_STAGE;
   return ENCODER_STAGES.find((stage) => stage.id === id);
 }
 

@@ -137,6 +137,7 @@ const KEY_FIELD = 1;
 const VALUE_FIELD = 2;
 const BLOCK_KEY = 'rukh_block';
 const BLUNDER_THRESHOLD_KEY = 'rukh_blunder_threshold';
+const INPUT_KEY = 'rukh_input';
 
 interface Cursor {
   bytes: Uint8Array;
@@ -237,4 +238,20 @@ export function readBlunderThreshold(bytes: Uint8Array): number | null {
   if (raw === null) return null;
   const value = Number.parseFloat(raw);
   return Number.isFinite(value) && value > 0 && value < 1 ? value : null;
+}
+
+/** The two ways an encoder can read a position: the board as 69 slots, or the game that led there. */
+export type EncoderInput = 'squares' | 'moves';
+
+/**
+ * Which scheme an encoder was trained on, from `rukh_input`, or null when the file does not say.
+ *
+ * The two are not interchangeable and a wrong guess does not fail: the ids of the 69 squares tokens
+ * are valid ids in the moves vocabulary too (they land on its control and Elo tokens), so a moves
+ * encoder fed a board answers a number for every position — the same number, more or less, whatever
+ * the position. That is exactly what the published encoder did in the demo until this was read.
+ */
+export function readEncoderInput(bytes: Uint8Array): EncoderInput | null {
+  const raw = readMetadata(bytes, INPUT_KEY);
+  return raw === 'squares' || raw === 'moves' ? raw : null;
 }
