@@ -12,8 +12,10 @@ import {
   type Move,
 } from '../lib/game';
 import {
+  buildPrompt,
   CONTEXT,
   DEFAULT_SAMPLE,
+  historyUci,
   proposeMove,
   type Proposal,
   type TopEntry,
@@ -30,13 +32,20 @@ import {
   findStage,
   modelUrl,
   stageBlock,
+  ENCODER_BLOCK,
   ENCODER_STAGES,
   NO_ADAPTER,
   STAGES,
   type Stage,
 } from '../lib/registry';
 import { MODEL_CACHE, type Backend, type ProgressMessage } from '../lib/worker-protocol';
-import { isLocalStage, modelBytes, readLocalModel, type LocalModel } from '../lib/byo';
+import {
+  isLocalStage,
+  modelBytes,
+  readLocalModel,
+  type EncoderInput,
+  type LocalModel,
+} from '../lib/byo';
 import { isCached } from '../lib/download';
 import { fenToTokens, UciTokenizer } from '../lib/chess-lm';
 import { createDecoder, type Decoder } from '../workers/decoder-client';
@@ -132,6 +141,12 @@ const evaluation = signal<Evaluation | null>(null);
  * falls back to `BLUNDER_THRESHOLD`, which is the published encoder's.
  */
 const blunderThreshold = signal<number | null>(null);
+/**
+ * How the live encoder reads a position and how many tokens it takes, as its own file says
+ * (`rukh_input`, `rukh_block`). Not signals: nothing draws them, `evaluatePosition` only reads them.
+ */
+let encoderInput: EncoderInput = 'squares';
+let encoderTokens = ENCODER_BLOCK;
 /**
  * Bumped every time the game on the board is replaced (new game, undo, colour or stage change).
  * An evaluation that was asked for under an older generation belongs to a game that no longer
@@ -378,6 +393,8 @@ async function loadEncoder() {
       (update) => (encoderProgress.value = update),
     );
     encoderBackend.value = ready.backend;
+    encoderInput = ready.input;
+    encoderTokens = ready.block;
     blunderThreshold.value = ready.blunderThreshold ?? null;
     encoderStatus.value = 'ready';
   } catch (cause) {
@@ -406,6 +423,18 @@ async function stopEncoder() {
 }
 
 /**
+ * The position in the scheme the live encoder was trained on. A `squares` encoder reads the board
+ * (69 fixed slots); a `moves` one reads the game that reached it, headed by `<bos>` and the two Elo
+ * tokens and cropped header-first like the decoder's prompt — `LabelledPositions.tokens` in Python
+ * builds its training rows the same way. The header carries the level the board is set to, as the
+ * decoder's does: the published encoder was trained on real games, each with its players' ratings.
+ */
+function positionTokens(state: GameState, fen: string): number[] {
+  if (encoderInput === 'squares') return fenToTokens(fen);
+  return buildPrompt(historyUci(state), elo.value, elo.value, tokenizer, encoderTokens);
+}
+
+/**
  * Evaluates a position the board settled on. The worker serialises its own runs, so a burst of
  * moves only queues; what is decided here is *which* answer the bar ends up drawing, and that is
  * not simply the newest one — `supersedes` explains why the player's own move wins over the reply
@@ -425,7 +454,7 @@ async function evaluatePosition(state: GameState) {
   // The side that has just moved is the one that is *not* to move now.
   const byHuman = ply > 0 && state.turn !== human.value;
   try {
-    const answer = await source.evaluate(fenToTokens(fen));
+    const answer = await source.evaluate(positionTokens(state, fen));
     if (asked !== generation) return;
     const next: Evaluation = { value: answer.value, blunder: answer.blunder, move, ply, byHuman };
     if (!supersedes(next, evaluation.value)) return;

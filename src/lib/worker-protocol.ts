@@ -135,8 +135,13 @@ export interface EncoderReadyMessage {
   backend: Backend;
   fallbackReason?: string;
   loadMs: number;
-  /** Tokens the session was accepted for (`squares`: 69). */
+  /**
+   * Tokens the session was accepted for: exactly 69 for `squares`, at most `rukh_block` (200) for
+   * `moves`, whose sequence axis is dynamic.
+   */
   block: number;
+  /** How the page must tokenize a position for this file, read from its `rukh_input`. */
+  input: 'squares' | 'moves';
   /** The two outputs the contract check found, in order: the value and the blunder head. */
   outputs: [string, string];
   /**

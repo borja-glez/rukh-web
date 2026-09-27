@@ -49,6 +49,7 @@ describe('worker protocol', () => {
       backend: 'wasm',
       loadMs: 30,
       block: 69,
+      input: 'squares',
       outputs: ['value', 'blunder'],
     };
     expect(asResponse(ready)).toBe(ready);

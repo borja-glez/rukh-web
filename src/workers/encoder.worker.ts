@@ -23,7 +23,7 @@ import {
   type EncoderContract,
 } from '../lib/contract';
 import type { EncoderRequest, WorkerResponse } from '../lib/worker-protocol';
-import { readBlunderThreshold } from '../lib/byo';
+import { readBlock, readBlunderThreshold, readEncoderInput, type EncoderInput } from '../lib/byo';
 import { configureOrt, createSerial, createSession, fetchModel, inputFeeds } from './ort-runtime';
 
 /** The worker global, typed with just what this file uses (avoids pulling in the webworker lib). */
@@ -39,6 +39,8 @@ configureOrt();
 let session: ort.InferenceSession | null = null;
 /** What the live session was accepted under; null while there is no session. */
 let contract: EncoderContract | null = null;
+/** The scheme the live session reads, from its own `rukh_input`. */
+let input: EncoderInput = 'squares';
 
 /** This worker's own chain: sessions created in series and `run` calls never overlapping. */
 const serial = createSerial();
@@ -57,13 +59,25 @@ async function init(request: Extract<EncoderRequest, { type: 'encoder-init' }>):
       reply({ type: 'progress', id: request.id, loaded, total }),
     );
     const created = await createSession(bytes);
-    const checked = readEncoderContract(created.session, request.block);
+    // The file says how it reads a position. A file older than `rukh_input` is a `squares`
+    // encoder, the only scheme there was; a `moves` one takes up to its own `rukh_block` tokens,
+    // not the 69 the registry declares for the board.
+    const scheme = readEncoderInput(bytes) ?? 'squares';
+    const block = scheme === 'moves' ? (readBlock(bytes) ?? request.block) : request.block;
+    const checked = readEncoderContract(created.session, block);
     // Read before the bytes go out of scope: ORT Web does not expose `metadata_props`, so the
     // only chance to learn the head's operating point is the file we just downloaded.
     const threshold = readBlunderThreshold(bytes);
     session = created.session;
     contract = checked;
-    return { backend: created.backend, reason: created.reason, contract: checked, threshold };
+    input = scheme;
+    return {
+      backend: created.backend,
+      reason: created.reason,
+      contract: checked,
+      threshold,
+      scheme,
+    };
   });
   reply({
     type: 'encoder-ready',
@@ -72,6 +86,7 @@ async function init(request: Extract<EncoderRequest, { type: 'encoder-init' }>):
     fallbackReason: ready.reason ?? undefined,
     loadMs: Math.round(performance.now() - started),
     block: ready.contract.block,
+    input: ready.scheme,
     outputs: [ready.contract.outputs[0], ready.contract.outputs[1]],
     ...(ready.threshold === null ? {} : { blunderThreshold: ready.threshold }),
   });
@@ -95,9 +110,17 @@ async function evaluate(request: Extract<EncoderRequest, { type: 'evaluate' }>):
     const current = session;
     const live = contract;
     if (!current || !live) throw new Error('el encoder todavía no está cargado');
-    if (request.ids.length !== live.block) {
+    // `squares` is a fixed layout of exactly `block` slots; `moves` is a game, from the three
+    // header tokens to at most `block` once the page has cropped it the way the decoder's prompt is.
+    const fits =
+      input === 'squares'
+        ? request.ids.length === live.block
+        : request.ids.length >= 3 && request.ids.length <= live.block;
+    if (!fits) {
       throw new Error(
-        `la posición trae ${request.ids.length} tokens y el encoder espera ${live.block}`,
+        input === 'squares'
+          ? `la posición trae ${request.ids.length} tokens y el encoder espera ${live.block}`
+          : `la partida trae ${request.ids.length} tokens y el encoder admite de 3 a ${live.block}`,
       );
     }
     const feeds = inputFeeds(current, request.ids);

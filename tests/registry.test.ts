@@ -7,6 +7,7 @@ import {
   ENCODER_BLOCK,
   ENCODER_SIZE_MB,
   ENCODER_STAGES,
+  MOVES_ENCODER_BLOCK,
   adapterUrl,
   adaptersFor,
   defaultEncoderId,
@@ -24,6 +25,7 @@ import {
   STAGE_SIZE_MB,
   TEST_ADAPTER,
   TEST_ENCODER_STAGE,
+  TEST_MOVES_ENCODER_STAGE,
   TEST_LORA_STAGE,
   TEST_STAGE,
 } from '../src/lib/registry';
@@ -141,11 +143,16 @@ describe('encoder stages', () => {
     expect(ENCODER_SIZE_MB['encoder-fp16']).toBeGreaterThan(ENCODER_SIZE_MB['encoder-int8']);
   });
 
-  it('feeds every encoder stage the 69 tokens of the squares scheme', () => {
+  it('asks each encoder for the tokens of the scheme it was trained on', () => {
+    // The published encoder reads the game (`rukh_input=moves`, `rukh_block=200`), not the board:
+    // asking it for the 69 squares tokens is what made the bar answer the same number for every
+    // position. The worker reads the scheme off the file; these are what a file that says
+    // nothing is asked for, and what the E2E toys declare.
     expect(ENCODER_BLOCK).toBe(SQUARE_TOKENS);
-    for (const stage of [...ENCODER_STAGES, TEST_ENCODER_STAGE]) {
-      expect(encoderBlock(stage)).toBe(SQUARE_TOKENS);
-    }
+    for (const stage of ENCODER_STAGES) expect(encoderBlock(stage)).toBe(MOVES_ENCODER_BLOCK);
+    expect(encoderBlock(TEST_ENCODER_STAGE)).toBe(SQUARE_TOKENS);
+    expect(encoderBlock(TEST_MOVES_ENCODER_STAGE)).toBe(MOVES_ENCODER_BLOCK);
+    expect(findEncoderStage('test-moves')).toBe(TEST_MOVES_ENCODER_STAGE);
     expect(encoderBlock({ ...TEST_ENCODER_STAGE, block: undefined })).toBe(ENCODER_BLOCK);
   });
 

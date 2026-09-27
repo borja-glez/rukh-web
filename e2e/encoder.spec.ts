@@ -330,3 +330,35 @@ test.describe('the encoder evaluation bar', () => {
     await expect(page.getByTestId('model-error')).toHaveCount(0);
   });
 });
+
+test.describe('an encoder that reads the game, not the board', () => {
+  // The published encoder is a `moves` one: it was trained on the game that led to a position,
+  // headed by `<bos>` and the two Elo tokens. Fed the 69 board tokens instead it answers, but the
+  // same number for every position, and nothing on the page says so. The toy `moves` encoder
+  // walks the path the real one takes: the scheme is read off the file and the page sends the
+  // game, one token longer after every move.
+  test('reads rukh_input off the file and feeds it the game', async ({ page, hasTouch }) => {
+    const requested = encoderRequests(page);
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.goto('/?mock=1&encoder=test-moves');
+    await expect(square(page, 'e2')).toBeVisible();
+    await waitIdle(page);
+    await turnBarOn(page);
+    expect(requested.filter((url) => url.endsWith('toy-encoder-moves.onnx'))).toHaveLength(1);
+
+    const readings: number[] = [];
+    for (const index of [0, 1]) {
+      readings.push(await playAndEvaluate(page, index, hasTouch));
+      // A squares-length or an over-long input would be refused by the worker and shown here.
+      await expect(page.getByTestId('encoder-error')).toHaveCount(0);
+    }
+    for (const value of readings) {
+      expect(value).toBeGreaterThanOrEqual(-1);
+      expect(value).toBeLessThanOrEqual(1);
+    }
+    // Two different games, two different inputs: a bar fed the wrong scheme stays put.
+    expect(readings[0]).not.toBe(readings[1]);
+    expect(errors).toEqual([]);
+  });
+});
